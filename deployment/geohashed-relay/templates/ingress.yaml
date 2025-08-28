@@ -19,10 +19,21 @@ spec:
   tls:
     - hosts:
         - {{ .Values.ingress.host }}
+        - "*.{{ .Values.ingress.host }}"
       secretName: {{ .Values.ingress.tls.secretName }}
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: geohashed-relay
+                port:
+                  number: {{ .Values.service.port }}
+    - host: "*.{{ .Values.ingress.host }}"
       http:
         paths:
           - path: /
