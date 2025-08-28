@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: geohashed-relay
+  namespace: geohashed-relay
+  labels:
+    app.kubernetes.io/name: geohashed-relay
+    app.kubernetes.io/part-of: geohashed-relay
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: geohashed-relay

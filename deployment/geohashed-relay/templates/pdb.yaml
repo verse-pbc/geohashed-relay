@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: geohashed-relay-pdb
+  namespace: geohashed-relay
+  labels:
+    app.kubernetes.io/name: geohashed-relay
+    app.kubernetes.io/part-of: geohashed-relay
+    app.kubernetes.io/managed-by: Helm
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: geohashed-relay

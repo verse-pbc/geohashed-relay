@@ -1,0 +1,181 @@
+name: Publish Image and Release Deployment
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  get_version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: write
+      id-token: write
+      pull-requests: write
+      security-events: write
+      statuses: write
+    outputs:
+      SemVer: ${{ steps.get-version.outputs.SemVer }}
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version
+        id: get-version
+        run: |
+          # Use timestamp and short SHA for unique versioning
+          # Format: 0.1.YYYYMMDD-HHMM-SHA
+          TIMESTAMP=$(date -u +"%Y%m%d-%H%M")
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          VERSION="0.1.${TIMESTAMP}-${SHORT_SHA}"
+          echo "SemVer=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Generated version: ${VERSION}"
+
+      - name: Output Version
+        run: |
+          echo "# Version:" >> $GITHUB_STEP_SUMMARY
+          echo ${{ steps.get-version.outputs.SemVer }} >> $GITHUB_STEP_SUMMARY
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    env:
+      CI: true # Ensure CI flag is set
+      RUST_LOG: debug # Higher log level for more information
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-target-
+
+      - name: Run tests
+        env:
+          RUST_BACKTRACE: 1
+          DATABASE_PATH: ./test_data
+        run: cargo test --verbose
+
+  push_to_registry:
+    needs: [get_version, test] # Add dependency on the test job
+    if: github.ref == 'refs/heads/main'
+    name: Push Docker image to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to the Github Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.get_version.outputs.SemVer }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        id: build-and-push-image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Output Image Details
+        if: steps.build-and-push-image.outcome == 'success'
+        run: |
+          echo "# Built and pushed the following images:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
+
+  merge_to_release:
+    name: Merge to Release
+    needs: [ push_to_registry, get_version ]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+
+      - name: Check Out the Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge main Branch Locally
+        shell: bash
+        run: |
+          git config --global user.name "verse-ci"
+          git config --global user.email "ci@verse.app"
+          git checkout release
+          git merge -Xtheirs --no-commit origin/main
+          # Reset workflow files to avoid permission issues
+          git reset HEAD .github/workflows/
+          git checkout -- .github/workflows/
+
+      - name: Apply Newest Version
+        shell: bash
+        run: |
+          echo "Image tag being patched to manifests:"
+          echo ${{ needs.get_version.outputs.SemVer }}
+          yq -i '.version = "${{ needs.get_version.outputs.SemVer }}"' ./deployment/geohashed-relay/Chart.yaml
+          yq -i '.appVersion = "${{ needs.get_version.outputs.SemVer }}"' ./deployment/geohashed-relay/Chart.yaml
+          yq -i '.image.tag = "${{ needs.get_version.outputs.SemVer }}"' ./deployment/geohashed-relay/values.yaml
+
+      - name: Commit and Push to Trigger Release
+        shell: bash
+        run: |
+          git add ./deployment/geohashed-relay/Chart.yaml ./deployment/geohashed-relay/values.yaml
+          git commit -m "Deploy version ${{ needs.get_version.outputs.SemVer }}"
+          git push
