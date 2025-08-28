@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayConfig {
@@ -17,16 +16,10 @@ pub struct RelayConfig {
     pub max_filters_per_subscription: usize,
     pub max_limit_per_filter: usize,
     
-    // Multi-tenancy
-    pub allowed_subdomains: HashSet<String>,
-    
     // Rate limiting
     pub events_per_minute: u32,
     
     // Features
-    pub require_auth_for_write: bool,
-    pub require_auth_for_read: bool,
-    pub enable_nip42_auth: bool,
     pub enable_nip40_expiration: bool,
     
     // Monitoring
@@ -45,11 +38,7 @@ impl Default for RelayConfig {
             max_subscriptions_per_connection: 20,
             max_filters_per_subscription: 10,
             max_limit_per_filter: 5000,
-            allowed_subdomains: HashSet::new(),
             events_per_minute: 30,  // 0.5 per second - reasonable for normal chat
-            require_auth_for_write: false,
-            require_auth_for_read: false,
-            enable_nip42_auth: true,
             enable_nip40_expiration: true,
             metrics_enabled: true,
             metrics_port: 9090,
@@ -81,20 +70,8 @@ impl RelayConfig {
             config.max_event_size = size.parse()?;
         }
         
-        if let Ok(subs) = std::env::var("ALLOWED_SUBDOMAINS") {
-            config.allowed_subdomains = subs.split(',').map(|s| s.trim().to_string()).collect();
-        }
-        
         if let Ok(rate) = std::env::var("EVENTS_PER_MINUTE") {
             config.events_per_minute = rate.parse()?;
-        }
-        
-        if let Ok(auth) = std::env::var("REQUIRE_AUTH_FOR_WRITE") {
-            config.require_auth_for_write = auth.parse()?;
-        }
-        
-        if let Ok(auth) = std::env::var("REQUIRE_AUTH_FOR_READ") {
-            config.require_auth_for_read = auth.parse()?;
         }
         
         Ok(config)

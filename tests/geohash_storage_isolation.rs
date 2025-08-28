@@ -11,7 +11,6 @@ use nostr_sdk::prelude::*;
 use nostr_lmdb::Scope;
 use relay_builder::{EventContext, EventProcessor, StoreCommand};
 use geohashed_relay::processor::{ConnectionState, GeohashedEventProcessor};
-use std::collections::HashSet;
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -39,10 +38,7 @@ async fn create_regular_event(content: &str) -> Event {
 /// Helper to create a test processor
 fn create_test_processor() -> GeohashedEventProcessor {
     GeohashedEventProcessor::new(
-        HashSet::new(),
         100,
-        false,
-        false,
     )
 }
 

@@ -14,7 +14,7 @@ use relay_builder::ScopeConfig;
 use nostr_sdk::prelude::*;
 use relay_builder::{
     RelayBuilder, RelayConfig as BuilderConfig,
-    middlewares::{NostrLoggerMiddleware, Nip42Middleware, Nip40ExpirationMiddleware},
+    middlewares::{NostrLoggerMiddleware, Nip40ExpirationMiddleware},
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::signal;
@@ -41,7 +41,6 @@ async fn main() -> Result<()> {
     let config = RelayConfig::from_env()?;
     info!("Starting Geohashed Relay on {}:{}", config.host, config.port);
     info!("Database path: {}", config.database_path);
-    info!("Allowed subdomains: {:?}", config.allowed_subdomains);
     info!("Rate limit: {} events/min", config.events_per_minute);
     
     // Load or generate relay keys
@@ -67,10 +66,7 @@ async fn main() -> Result<()> {
     
     // Create the event processor
     let processor = GeohashedEventProcessor::new(
-        config.allowed_subdomains.clone(),
         config.events_per_minute,
-        config.require_auth_for_write,
-        config.require_auth_for_read,
     );
     
     // Configure the relay with subdomain support
@@ -96,17 +92,8 @@ async fn main() -> Result<()> {
         .event_processor(processor)
         .without_defaults(); // We'll add middleware manually
     
-    // Build with middleware - always add logger
-    use relay_builder::middlewares::AuthConfig;
-    let auth_config = AuthConfig {
-        relay_url: config.relay_url.clone(),
-        validate_subdomains: true,
-    };
-    
+    // Build with middleware
     info!("Building relay with middleware...");
-    if config.enable_nip42_auth {
-        info!("- NIP-42 authentication enabled");
-    }
     if config.enable_nip40_expiration {
         info!("- NIP-40 expiration checking enabled");  
     }
@@ -114,7 +101,6 @@ async fn main() -> Result<()> {
     let handler = builder.build_with(|chain| {
         chain
             .with(NostrLoggerMiddleware::new())
-            .with(Nip42Middleware::new(auth_config))
             .with(Nip40ExpirationMiddleware)
     }).await?;
     

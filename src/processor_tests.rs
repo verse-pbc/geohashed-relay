@@ -1,15 +1,10 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    
-    use std::collections::HashSet;
 
     fn create_test_processor() -> GeohashedEventProcessor {
         GeohashedEventProcessor::new(
-            HashSet::new(),        // allowed_subdomains
             100,                    // events_per_minute
-            false,                  // require_auth_for_write
-            false,                  // require_auth_for_read
         )
     }
 
@@ -141,24 +136,9 @@ mod tests {
     }
 
     #[test]
-    fn test_geohash_subdomain_allowed() {
-        let processor = create_test_processor();
-        
-        // Valid geohash subdomains should always be allowed
-        let geohash_scope = nostr_lmdb::Scope::named("drt2z").unwrap();
-        assert!(processor.is_subdomain_allowed(&geohash_scope));
-        
-        let short_geohash_scope = nostr_lmdb::Scope::named("d").unwrap();
-        assert!(processor.is_subdomain_allowed(&short_geohash_scope));
-    }
-
-    #[test]
     fn test_uniform_rate_limiting() {
         let processor = GeohashedEventProcessor::new(
-            HashSet::new(),
             100,  // rate for all scopes
-            false,
-            false,
         );
         
         // All scopes get the same rate

@@ -2,11 +2,10 @@ use anyhow::Result;
 use nostr_sdk::prelude::*;
 use parking_lot::RwLock;
 use relay_builder::{EventContext, EventProcessor, StoreCommand, Error as RelayError};
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use crate::geohash_utils::{extract_geohash_tags, is_geohash_subdomain};
+use crate::geohash_utils::extract_geohash_tags;
 
 /// Per-connection state for rate limiting and tracking
 #[derive(Debug, Clone, Default)]
@@ -35,50 +34,21 @@ impl Default for RateLimitInfo {
 /// Multi-tenant event processor with geohash-based location routing
 #[derive(Debug, Clone)]
 pub struct GeohashedEventProcessor {
-    allowed_subdomains: HashSet<String>,
     events_per_minute: u32,
-    require_auth_for_write: bool,
-    require_auth_for_read: bool,
 }
 
 impl GeohashedEventProcessor {
     pub fn new(
-        allowed_subdomains: HashSet<String>,
         events_per_minute: u32,
-        require_auth_for_write: bool,
-        require_auth_for_read: bool,
     ) -> Self {
         Self {
-            allowed_subdomains,
             events_per_minute,
-            require_auth_for_write,
-            require_auth_for_read,
         }
     }
     
     fn get_rate_limit(&self, _subdomain: &nostr_lmdb::Scope) -> u32 {
         // Same rate limit for all scopes
         self.events_per_minute
-    }
-    
-    fn is_subdomain_allowed(&self, subdomain: &nostr_lmdb::Scope) -> bool {
-        match subdomain {
-            nostr_lmdb::Scope::Named { name, .. } => {
-                // Always allow valid geohash subdomains
-                if is_geohash_subdomain(name) {
-                    return true;
-                }
-                
-                // If we have a whitelist, check it
-                if !self.allowed_subdomains.is_empty() {
-                    self.allowed_subdomains.contains(name)
-                } else {
-                    // If no whitelist, all subdomains are allowed
-                    true
-                }
-            }
-            nostr_lmdb::Scope::Default => true, // Root domain always allowed
-        }
     }
 }
 
@@ -89,21 +59,6 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         custom_state: Arc<RwLock<ConnectionState>>,
         context: EventContext<'_>,
     ) -> Result<Vec<StoreCommand>, RelayError> {
-        // Check subdomain access
-        if !self.is_subdomain_allowed(&context.subdomain) {
-            warn!(
-                "Rejected event from disallowed subdomain: {:?}",
-                context.subdomain
-            );
-            return Err(RelayError::restricted("subdomain not allowed"));
-        }
-        
-        // Check authentication requirements
-        if self.require_auth_for_write && context.authed_pubkey.is_none() {
-            warn!("Rejected event from unauthenticated user");
-            return Err(RelayError::auth_required("authentication required for writing"));
-        }
-        
         // Rate limiting
         let mut state = custom_state.write();
         let now = Instant::now();
@@ -186,19 +141,9 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         &self,
         _event: &Event,
         _custom_state: Arc<RwLock<ConnectionState>>,
-        context: EventContext<'_>,
+        _context: EventContext<'_>,
     ) -> Result<bool, RelayError> {
-        // Check if subdomain is allowed
-        if !self.is_subdomain_allowed(&context.subdomain) {
-            return Ok(false);
-        }
-        
-        // Check read authentication requirements
-        if self.require_auth_for_read && context.authed_pubkey.is_none() {
-            return Ok(false);
-        }
-        
-        // Event is visible
+        // Event is visible to all
         Ok(true)
     }
     
@@ -206,18 +151,8 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         &self,
         filters: &[Filter],
         _custom_state: Arc<RwLock<ConnectionState>>,
-        context: EventContext<'_>,
+        _context: EventContext<'_>,
     ) -> Result<(), RelayError> {
-        // Check subdomain access
-        if !self.is_subdomain_allowed(&context.subdomain) {
-            return Err(RelayError::restricted("subdomain not allowed"));
-        }
-        
-        // Check read authentication if required
-        if self.require_auth_for_read && context.authed_pubkey.is_none() {
-            return Err(RelayError::auth_required("authentication required for reading"));
-        }
-        
         // Basic filter validation
         for filter in filters {
             // You can add custom filter validation here
