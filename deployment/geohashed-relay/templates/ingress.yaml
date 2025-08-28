@@ -9,6 +9,7 @@ metadata:
     app.kubernetes.io/part-of: geohashed-relay
     app.kubernetes.io/managed-by: Helm
   annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/websocket-services: geohashed-relay
@@ -20,6 +21,10 @@ spec:
     - hosts:
         - {{ .Values.ingress.host }}
       secretName: {{ .Values.ingress.tls.secretName }}
+    - hosts:
+        - hashstr.com
+        - "*.hashstr.com"
+      secretName: hashstr-com-tls
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}
@@ -33,6 +38,27 @@ spec:
                 port:
                   number: {{ .Values.service.port }}
     - host: "*.{{ .Values.ingress.host }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: geohashed-relay
+                port:
+                  number: {{ .Values.service.port }}
+    # hashstr.com domain
+    - host: hashstr.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: geohashed-relay
+                port:
+                  number: {{ .Values.service.port }}
+    - host: "*.hashstr.com"
       http:
         paths:
           - path: /
