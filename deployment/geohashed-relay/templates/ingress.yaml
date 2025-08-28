@@ -21,10 +21,6 @@ spec:
     - hosts:
         - {{ .Values.ingress.host }}
       secretName: {{ .Values.ingress.tls.secretName }}
-    - hosts:
-        - hashstr.com
-        - "*.hashstr.com"
-      secretName: hashstr-com-tls
   {{- end }}
   rules:
     - host: {{ .Values.ingress.host }}
