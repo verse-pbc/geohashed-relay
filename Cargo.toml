@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 # Core dependencies
-relay_builder = { path = "../groups/relay_repos/relay_builder" }
-websocket_builder = { path = "../groups/relay_repos/websocket_builder" }
+relay_builder = { git = "https://github.com/verse-pbc/relay_builder", branch = "optimize-lock-usage" }
+websocket_builder = { git = "https://github.com/verse-pbc/websocket_builder" }
 nostr-sdk = { git = "https://github.com/verse-pbc/nostr", features = ["all-nips"] }
 nostr = { git = "https://github.com/verse-pbc/nostr", features = ["std"] }
 nostr-lmdb = { git = "https://github.com/verse-pbc/nostr" }
