@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod config;
 mod processor;
 mod geohash_utils;
@@ -14,7 +16,7 @@ use relay_builder::ScopeConfig;
 use nostr_sdk::prelude::*;
 use relay_builder::{
     RelayBuilder, RelayConfig as BuilderConfig,
-    middlewares::{NostrLoggerMiddleware, Nip40ExpirationMiddleware, RateLimitMiddleware},
+    middlewares::{NostrLoggerMiddleware, Nip40ExpirationMiddleware, RateLimitMiddleware, ErrorHandlingMiddleware},
 };
 use governor::Quota;
 use std::{net::SocketAddr, sync::Arc, num::NonZeroU32};
@@ -99,6 +101,7 @@ async fn main() -> Result<()> {
     
     let handler = builder.build_with(|chain| {
         chain
+            .with(ErrorHandlingMiddleware::new())  // Add this FIRST to catch all errors
             .with(NostrLoggerMiddleware::new())
             .with(RateLimitMiddleware::new(
                 Quota::per_minute(NonZeroU32::new(config.events_per_minute).unwrap())

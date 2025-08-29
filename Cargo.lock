@@ -2492,7 +2492,7 @@ checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 [[package]]
 name = "relay_builder"
 version = "0.5.0-alpha.1"
-source = "git+https://github.com/verse-pbc/relay_builder?branch=optimize-lock-usage#e37b76e54509ca18e7af84884ee3d1390af2d7f3"
+source = "git+https://github.com/verse-pbc/relay_builder?branch=optimize-lock-usage#7f74eed27fefaa24134b1e8ee2ff63d0f2d881f8"
 dependencies = [
  "anyhow",
  "arc-swap",
