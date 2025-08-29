@@ -55,48 +55,50 @@ fn create_context(scope: Scope) -> EventContext<'static> {
 }
 
 #[tokio::test]
-async fn test_geohash_auto_forwarding_creates_correct_scope() {
+async fn test_geohash_rejection_and_acceptance() {
     let processor = create_test_processor();
     
-    // Test 1: Event with geohash posted to root domain
+    // Test 1: Event with geohash posted to root domain - should be rejected
     let event_with_geo = create_event_with_geohash("SF event", "drt2z").await;
     let state = Arc::new(RwLock::new(ConnectionState::default()));
     let root_context = create_context(Scope::Default);
     
     let result = processor.handle_event(event_with_geo.clone(), state.clone(), root_context).await;
-    assert!(result.is_ok());
+    assert!(result.is_err(), "Geotagged event should be rejected at root");
     
-    let commands = result.unwrap();
+    if let Err(e) = result {
+        let msg = e.to_string();
+        assert!(msg.contains("root relay does not accept geotagged events"));
+        assert!(msg.contains("drt2z.hashstr.com"));
+    }
+    
+    // Test 2: Same event posted from a different subdomain - should be rejected
+    let team_context = create_context(Scope::named("team1").unwrap());
+    let result2 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), team_context).await;
+    assert!(result2.is_err(), "Event should be rejected on non-matching subdomain");
+    
+    if let Err(e) = result2 {
+        let msg = e.to_string();
+        assert!(msg.contains("events with geohash 'drt2z' must be posted to"));
+        assert!(msg.contains("drt2z.hashstr.com"));
+    }
+    
+    // Test 3: Event posted to matching subdomain - should be accepted and stored
+    let matching_context = create_context(Scope::named("drt2z").unwrap());
+    let result3 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), matching_context).await;
+    assert!(result3.is_ok(), "Event should be accepted on matching subdomain");
+    
+    let commands = result3.unwrap();
     assert_eq!(commands.len(), 1);
     
-    // Verify it's stored in geohash scope, not root
+    // Verify it's stored in the correct scope
     match &commands[0] {
         StoreCommand::SaveSignedEvent(_, scope, _) => {
             match scope {
                 Scope::Named { name, .. } => {
-                    assert_eq!(name, "drt2z", "Event should be stored in geohash scope");
+                    assert_eq!(name, "drt2z", "Event should be stored in matching geohash scope");
                 }
                 _ => panic!("Expected Named scope for geohash"),
-            }
-        }
-        _ => panic!("Expected SaveSignedEvent"),
-    }
-    
-    // Test 2: Same event posted from a different subdomain
-    let team_context = create_context(Scope::named("team1").unwrap());
-    let result2 = processor.handle_event(event_with_geo, Arc::new(RwLock::new(ConnectionState::default())), team_context).await;
-    assert!(result2.is_ok());
-    
-    let commands2 = result2.unwrap();
-    
-    // Should still go to geohash scope, not team1
-    match &commands2[0] {
-        StoreCommand::SaveSignedEvent(_, scope, _) => {
-            match scope {
-                Scope::Named { name, .. } => {
-                    assert_eq!(name, "drt2z", "Event should still be in geohash scope, not team1");
-                }
-                _ => panic!("Expected Named scope"),
             }
         }
         _ => panic!("Expected SaveSignedEvent"),
@@ -158,28 +160,26 @@ async fn test_multiple_geohash_tags_use_first_only() {
         .await
         .unwrap();
     
+    // Test 1: Posted to root domain - should be rejected (uses first geohash)
     let state = Arc::new(RwLock::new(ConnectionState::default()));
     let context = create_context(Scope::Default);
     
-    let result = processor.handle_event(event, state, context).await;
-    assert!(result.is_ok());
+    let result = processor.handle_event(event.clone(), state, context).await;
+    assert!(result.is_err(), "Event with geohash should be rejected at root");
     
-    let commands = result.unwrap();
+    // Test 2: Posted to matching first geohash subdomain - should succeed
+    let state2 = Arc::new(RwLock::new(ConnectionState::default()));
+    let context2 = create_context(Scope::named("drt2z").unwrap());
     
-    // Should use ONLY the first geohash
-    match &commands[0] {
-        StoreCommand::SaveSignedEvent(_, scope, _) => {
-            match scope {
-                Scope::Named { name, .. } => {
-                    assert_eq!(name, "drt2z", "Should use only first geohash");
-                    assert_ne!(name, "9q8yy", "Should not use second geohash");
-                    assert_ne!(name, "gbsuv", "Should not use third geohash");
-                }
-                _ => panic!("Expected Named scope"),
-            }
-        }
-        _ => panic!("Expected SaveSignedEvent"),
-    }
+    let result2 = processor.handle_event(event.clone(), state2, context2).await;
+    assert!(result2.is_ok(), "Event should be accepted on first geohash subdomain");
+    
+    // Test 3: Posted to second geohash subdomain - should be rejected
+    let state3 = Arc::new(RwLock::new(ConnectionState::default()));
+    let context3 = create_context(Scope::named("9q8yy").unwrap());
+    
+    let result3 = processor.handle_event(event, state3, context3).await;
+    assert!(result3.is_err(), "Event should be rejected on non-first geohash subdomain");
 }
 
 #[tokio::test]
@@ -237,23 +237,30 @@ async fn test_geohash_scopes_are_isolated() {
         (london_event, "gbsuv"),
     ];
     
-    // Process each event and verify correct scope assignment
+    // Test that each event is rejected from root but accepted on correct subdomain
     for (event, expected_geohash) in events {
+        // Test 1: Rejected at root
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         let context = create_context(Scope::Default);
         
         let result = processor.handle_event(event.clone(), state, context).await;
-        assert!(result.is_ok());
+        assert!(result.is_err(), "Geotagged event should be rejected at root");
         
-        let commands = result.unwrap();
+        // Test 2: Accepted at correct subdomain
+        let state2 = Arc::new(RwLock::new(ConnectionState::default()));
+        let context2 = create_context(Scope::named(expected_geohash).unwrap());
         
+        let result2 = processor.handle_event(event.clone(), state2, context2).await;
+        assert!(result2.is_ok(), "Event should be accepted on matching subdomain");
+        
+        let commands = result2.unwrap();
         match &commands[0] {
             StoreCommand::SaveSignedEvent(stored_event, scope, _) => {
                 assert_eq!(stored_event.id, event.id);
                 match scope {
                     Scope::Named { name, .. } => {
                         assert_eq!(name, expected_geohash, 
-                                   "Event should be stored in its geohash scope");
+                                   "Event should be stored in its matching scope");
                     }
                     _ => panic!("Expected Named scope"),
                 }
@@ -268,35 +275,37 @@ async fn test_same_event_different_endpoints_same_storage() {
     let processor = create_test_processor();
     let event = create_event_with_geohash("Consistent routing", "u09tu").await;
     
-    // Try from multiple connection endpoints
+    // Try from multiple connection endpoints - all should reject except matching one
     let endpoints = vec![
-        Scope::Default,
-        Scope::named("team1").unwrap(),
-        Scope::named("admin").unwrap(),
-        Scope::named("9q8yy").unwrap(),  // Different geohash
+        (Scope::Default, false, "root"),
+        (Scope::named("team1").unwrap(), false, "team1"),
+        (Scope::named("admin").unwrap(), false, "admin"),
+        (Scope::named("9q8yy").unwrap(), false, "different geohash"),
+        (Scope::named("u09tu").unwrap(), true, "matching geohash"),  // Only this should accept
     ];
     
-    for endpoint in endpoints {
+    for (endpoint, should_succeed, description) in endpoints {
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         let context = create_context(endpoint.clone());
         
         let result = processor.handle_event(event.clone(), state, context).await;
-        assert!(result.is_ok());
         
-        let commands = result.unwrap();
-        
-        // All should route to same geohash scope regardless of connection endpoint
-        match &commands[0] {
-            StoreCommand::SaveSignedEvent(_, scope, _) => {
-                match scope {
-                    Scope::Named { name, .. } => {
-                        assert_eq!(name, "u09tu", 
-                                   "Event should always route to its geohash scope");
+        if should_succeed {
+            assert!(result.is_ok(), "Event should be accepted on {}", description);
+            let commands = result.unwrap();
+            match &commands[0] {
+                StoreCommand::SaveSignedEvent(_, scope, _) => {
+                    match scope {
+                        Scope::Named { name, .. } => {
+                            assert_eq!(name, "u09tu", "Event should be stored in matching scope");
+                        }
+                        _ => panic!("Expected Named scope"),
                     }
-                    _ => panic!("Expected Named scope"),
                 }
+                _ => panic!("Expected SaveSignedEvent"),
             }
-            _ => panic!("Expected SaveSignedEvent"),
+        } else {
+            assert!(result.is_err(), "Event should be rejected on {}", description);
         }
     }
 }

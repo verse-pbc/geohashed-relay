@@ -1,1 +1,8 @@
 /target
+/data
+*.mdb
+run.sh
+/scripts
+.DS_Store
+.env
+*.log

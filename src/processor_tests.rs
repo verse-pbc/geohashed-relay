@@ -39,7 +39,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_geohash_auto_forwarding() {
+    async fn test_geohash_rejected_at_root() {
         let processor = create_test_processor();
         let event = create_event_with_geohash("drt2z").await;
         let state = Arc::new(RwLock::new(ConnectionState::default()));
@@ -47,14 +47,36 @@ mod tests {
         // Create context for root domain connection
         let context = create_test_context(nostr_lmdb::Scope::Default);
         
-        // Process event
+        // Process event - should return error since root doesn't accept geotagged events
+        let result = processor.handle_event(event.clone(), state, context).await;
+        assert!(result.is_err());
+        
+        // Verify error message
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(error_msg.contains("restricted"));
+            assert!(error_msg.contains("root relay does not accept geotagged events"));
+            assert!(error_msg.contains("drt2z.hashstr.com"));
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_geohash_correct_scope_stores() {
+        let processor = create_test_processor();
+        let event = create_event_with_geohash("drt2z").await;
+        let state = Arc::new(RwLock::new(ConnectionState::default()));
+        
+        // Create context for matching geohash subdomain
+        let context = create_test_context(nostr_lmdb::Scope::named("drt2z").unwrap());
+        
+        // Process event - should store since we're on the correct subdomain
         let result = processor.handle_event(event.clone(), state, context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
         assert_eq!(commands.len(), 1);
         
-        // Verify event is forwarded to geohash scope
+        // Verify event is stored in correct scope
         match &commands[0] {
             StoreCommand::SaveSignedEvent(_, scope, _) => {
                 match scope {
@@ -113,7 +135,8 @@ mod tests {
             .unwrap();
         
         let state = Arc::new(RwLock::new(ConnectionState::default()));
-        let context = create_test_context(nostr_lmdb::Scope::Default);
+        // Use the correct geohash subdomain for the first tag
+        let context = create_test_context(nostr_lmdb::Scope::named("drt2z").unwrap());
         
         // Process event
         let result = processor.handle_event(event.clone(), state, context).await;
@@ -135,6 +158,27 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_wrong_geohash_subdomain_rejected() {
+        let processor = create_test_processor();
+        let event = create_event_with_geohash("drt2z").await;
+        let state = Arc::new(RwLock::new(ConnectionState::default()));
+        
+        // Create context for different geohash subdomain
+        let context = create_test_context(nostr_lmdb::Scope::named("9q8yy").unwrap());
+        
+        // Process event - should return error since wrong subdomain
+        let result = processor.handle_event(event.clone(), state, context).await;
+        assert!(result.is_err());
+        
+        // Verify error message guides to correct subdomain
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(error_msg.contains("restricted"));
+            assert!(error_msg.contains("events with geohash 'drt2z' must be posted to wss://drt2z.hashstr.com"));
+        }
+    }
+    
     #[test]
     fn test_uniform_rate_limiting() {
         let processor = GeohashedEventProcessor::new(

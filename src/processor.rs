@@ -104,37 +104,69 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
             .collect();
         let geohash_tags = extract_geohash_tags(&tags);
         
-        let storage_scope = if let Some(first_geohash) = geohash_tags.first() {
-            // Auto-forward to geohash scope
-            info!(
-                "Auto-forwarding event {} to geohash scope '{}' (posted via {:?})",
-                event.id,
-                first_geohash,
-                context.subdomain
-            );
-            // Create a named scope for the geohash
-            nostr_lmdb::Scope::named(first_geohash).unwrap_or(context.subdomain.clone())
-        } else {
-            // Use connection's subdomain scope
-            context.subdomain.clone()
+        // Extract the current subdomain name
+        let current_subdomain = match &context.subdomain {
+            nostr_lmdb::Scope::Named { name, .. } => Some(name.as_str()),
+            nostr_lmdb::Scope::Default => None,
         };
         
-        // Log event acceptance
-        info!(
-            "Accepted event {} from {} - storing in scope {:?} (auth: {:?})",
-            event.id,
-            event.pubkey,
-            storage_scope,
-            context.authed_pubkey
-        );
-        
-        // Store the event with proper scope isolation
-        // Note: OK response will be ["OK", event_id, true, ""] per NIP-01
-        Ok(vec![StoreCommand::SaveSignedEvent(
-            Box::new(event),
-            storage_scope,
-            None,
-        )])
+        // Check if event has a geohash tag
+        if let Some(first_geohash) = geohash_tags.first() {
+            // Event has a geohash tag - check if we're on the correct subdomain
+            let is_correct_scope = match current_subdomain {
+                Some(subdomain) => subdomain == first_geohash,
+                None => false, // Root domain never accepts geotagged events
+            };
+            
+            if is_correct_scope {
+                // We're on the correct subdomain - store the event
+                info!(
+                    "Storing event {} with matching geohash '{}'",
+                    event.id,
+                    first_geohash
+                );
+                Ok(vec![StoreCommand::SaveSignedEvent(
+                    Box::new(event),
+                    context.subdomain.clone(),
+                    None,
+                )])
+            } else {
+                // Wrong subdomain - reject with helpful error message
+                let message = if current_subdomain.is_none() {
+                    format!(
+                        "restricted: root relay does not accept geotagged events; use wss://{}.hashstr.com",
+                        first_geohash
+                    )
+                } else {
+                    format!(
+                        "restricted: events with geohash '{}' must be posted to wss://{}.hashstr.com",
+                        first_geohash,
+                        first_geohash
+                    )
+                };
+                
+                info!(
+                    "Rejecting event {} with geohash '{}' (posted to {:?})",
+                    event.id,
+                    first_geohash,
+                    context.subdomain
+                );
+                
+                Err(RelayError::restricted(message))
+            }
+        } else {
+            // No geohash tag - store in current scope
+            info!(
+                "Storing event {} without geohash in scope {:?}",
+                event.id,
+                context.subdomain
+            );
+            Ok(vec![StoreCommand::SaveSignedEvent(
+                Box::new(event),
+                context.subdomain.clone(),
+                None,
+            )])
+        }
     }
     
     fn can_see_event(
