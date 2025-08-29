@@ -68,9 +68,9 @@ async fn test_geohash_rejection_and_acceptance() {
         assert!(msg.contains("drt2z.hashstr.com"));
     }
     
-    // Test 2: Same event posted from a different subdomain - should be rejected
-    let team_context = create_context(Scope::named("team1").unwrap());
-    let result2 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), &team_context).await;
+    // Test 2: Same event posted from a different valid geohash subdomain - should be rejected
+    let other_geohash_context = create_context(Scope::named("9q8yy").unwrap()); // LA geohash
+    let result2 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), &other_geohash_context).await;
     assert!(result2.is_err(), "Event should be rejected on non-matching subdomain");
     
     if let Err(e) = result2 {
@@ -106,11 +106,11 @@ async fn test_events_without_geohash_stay_in_connection_scope() {
     let processor = create_test_processor();
     let event = create_regular_event("Regular event").await;
     
-    // Test from different connection scopes
+    // Test from different connection scopes (only valid geohashes allowed as subdomains)
     let test_cases = vec![
         (Scope::Default, "root"),
-        (Scope::named("team1").unwrap(), "team1"),
-        (Scope::named("drt2z").unwrap(), "drt2z"),  // Even if connected via geohash subdomain
+        (Scope::named("gbsuv").unwrap(), "gbsuv"),  // London geohash
+        (Scope::named("drt2z").unwrap(), "drt2z"),  // SF geohash
     ];
     
     for (connection_scope, expected_name) in test_cases {
@@ -193,23 +193,23 @@ async fn test_invalid_geohash_falls_back_to_connection_scope() {
         .await
         .unwrap();
     
-    // Test from team1 subdomain
+    // Test from valid geohash subdomain
     let state = Arc::new(RwLock::new(ConnectionState::default()));
-    let team_scope = Scope::named("team1").unwrap();
-    let context = create_context(team_scope);
+    let geohash_scope = Scope::named("u09tu").unwrap(); // Valid geohash
+    let context = create_context(geohash_scope);
     
     let result = processor.handle_event(event, state, &context).await;
     assert!(result.is_ok());
     
     let commands = result.unwrap();
     
-    // Should fall back to connection scope (team1) since geohash is invalid
+    // Should fall back to connection scope (u09tu) since geohash tag is invalid
     match &commands[0] {
         StoreCommand::SaveSignedEvent(_, scope, _) => {
             match scope {
                 Scope::Named { name, .. } => {
-                    assert_eq!(name, "team1", 
-                               "Invalid geohash should fall back to connection scope");
+                    assert_eq!(name, "u09tu", 
+                               "Invalid geohash tag should fall back to connection scope");
                 }
                 _ => panic!("Expected Named scope"),
             }

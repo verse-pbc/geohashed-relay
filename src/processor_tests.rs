@@ -92,8 +92,8 @@ mod tests {
         let event = create_event_without_geohash().await;
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         
-        // Create context for subdomain connection
-        let subdomain_scope = nostr_lmdb::Scope::named("team1").unwrap();
+        // Create context for a valid geohash subdomain connection
+        let subdomain_scope = nostr_lmdb::Scope::named("gbsuv").unwrap(); // London geohash
         let context = create_test_context(subdomain_scope.clone());
         
         // Process event
@@ -108,7 +108,7 @@ mod tests {
             StoreCommand::SaveSignedEvent(_, scope, _) => {
                 match scope {
                     nostr_lmdb::Scope::Named { name, .. } => {
-                        assert_eq!(name, "team1");
+                        assert_eq!(name, "gbsuv");
                     }
                     _ => panic!("Expected Named scope with subdomain"),
                 }
@@ -177,6 +177,26 @@ mod tests {
     
 
     #[tokio::test]
+    async fn test_invalid_subdomain_rejected() {
+        let processor = create_test_processor();
+        let event = create_event_without_geohash().await;
+        let state = Arc::new(RwLock::new(ConnectionState::default()));
+        
+        // Try to post to an invalid subdomain (not a valid geohash)
+        let invalid_scope = nostr_lmdb::Scope::named("foobar").unwrap();
+        let context = create_test_context(invalid_scope);
+        
+        // Should reject the event
+        let result = processor.handle_event(event.clone(), state, &context).await;
+        assert!(result.is_err());
+        
+        if let Err(e) = result {
+            let error_msg = e.to_string();
+            assert!(error_msg.contains("'foobar' is not a valid geohash subdomain"));
+        }
+    }
+
+    #[tokio::test]
     async fn test_invalid_geohash_tag_ignored() {
         let processor = create_test_processor();
         let keys = Keys::generate();
@@ -190,8 +210,8 @@ mod tests {
         
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         
-        // Connect via team1 subdomain
-        let subdomain_scope = nostr_lmdb::Scope::named("team1").unwrap();
+        // Connect via a valid geohash subdomain (not "team1" which is invalid)
+        let subdomain_scope = nostr_lmdb::Scope::named("u09tu").unwrap();
         let context = create_test_context(subdomain_scope.clone());
         
         // Process event
@@ -205,7 +225,7 @@ mod tests {
             StoreCommand::SaveSignedEvent(_, scope, _) => {
                 match scope {
                     nostr_lmdb::Scope::Named { name, .. } => {
-                        assert_eq!(name, "team1", "Invalid geohash ignored, uses subdomain");
+                        assert_eq!(name, "u09tu", "Invalid geohash ignored, uses subdomain");
                     }
                     _ => panic!("Expected Named scope"),
                 }

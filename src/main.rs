@@ -100,13 +100,26 @@ async fn main() -> Result<()> {
     }
     
     let handler = builder.build_with(|chain| {
-        chain
-            .with(ErrorHandlingMiddleware::new())  // Add this FIRST to catch all errors
-            .with(NostrLoggerMiddleware::new())
+        // Debug: Print the type of the base chain (should have RelayMiddleware as innermost)
+        let chain_step1 = chain
             .with(RateLimitMiddleware::new(
                 Quota::per_minute(NonZeroU32::new(config.events_per_minute).unwrap())
-            ))
-            .with(Nip40ExpirationMiddleware)
+            ));
+        
+        // At this point, chain is: RateLimitMiddleware -> RelayMiddleware -> End
+        let chain_step2 = chain_step1.with(Nip40ExpirationMiddleware);
+        // Now: Nip40ExpirationMiddleware -> RateLimitMiddleware -> RelayMiddleware -> End
+        
+        let chain_step3 = chain_step2.with(ErrorHandlingMiddleware::new());
+        // Now: ErrorHandlingMiddleware -> Nip40ExpirationMiddleware -> RateLimitMiddleware -> RelayMiddleware -> End
+        
+        let final_chain = chain_step3.with(NostrLoggerMiddleware::new());
+        // Final: NostrLoggerMiddleware -> ErrorHandlingMiddleware -> Nip40ExpirationMiddleware -> RateLimitMiddleware -> RelayMiddleware -> End
+        
+        // Print the type name (this will be very long!)
+        info!("Middleware chain type: {}", std::any::type_name_of_val(&final_chain));
+        
+        final_chain
     }).await?;
     
     // Create the Axum app

@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: ghcr.io/verse-pbc/geohashed-relay
-  tag: "0.1.20250829-2033-aadbc23" # Uses Chart.AppVersion when empty
+  tag: "0.1.20250829-2216-ef7ad8b" # Uses Chart.AppVersion when empty
   pullPolicy: Always
 # StatefulSet configuration
 statefulset:
