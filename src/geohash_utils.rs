@@ -4,8 +4,6 @@
 //! used in location-based event routing. Events are routed to exact geohash
 //! scopes only - no hierarchical propagation.
 
-use geohash::decode;
-
 /// Maximum allowed geohash precision (7 characters = ~152m)
 pub const MAX_GEOHASH_LENGTH: usize = 7;
 
@@ -37,19 +35,6 @@ pub fn normalize_geohash(gh: &str) -> Option<String> {
     Some(gh.to_lowercase())
 }
 
-/// Validates a geohash using the georust library's decoder
-/// 
-/// This provides additional validation beyond character checking,
-/// ensuring the geohash represents a valid geographic location
-pub fn is_valid_geohash_strict(gh: &str) -> bool {
-    if !is_valid_geohash(gh) {
-        return false;
-    }
-    
-    // Try to decode - if it fails, the geohash is invalid
-    decode(gh).is_ok()
-}
-
 /// Extracts geohash tags from a Nostr event's tags array
 /// 
 /// Looks for tags with ["g", "geohash"] format and validates them.
@@ -66,18 +51,30 @@ pub fn extract_geohash_tags(tags: &[Vec<String>]) -> Vec<String> {
         .collect()
 }
 
-/// Checks if a subdomain string is a valid geohash
-/// 
-/// Used to determine if a subdomain should be treated as a geohash scope
-/// or a regular team/group name
-pub fn is_geohash_subdomain(subdomain: &str) -> bool {
-    // Must be valid geohash and use strict validation to ensure it's geographic
-    is_valid_geohash_strict(subdomain)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geohash::decode;
+    
+    /// Validates a geohash using the georust library's decoder
+    /// This provides additional validation beyond character checking,
+    /// ensuring the geohash represents a valid geographic location
+    fn is_valid_geohash_strict(gh: &str) -> bool {
+        if !is_valid_geohash(gh) {
+            return false;
+        }
+        
+        // Try to decode - if it fails, the geohash is invalid
+        decode(gh).is_ok()
+    }
+    
+    /// Checks if a subdomain string is a valid geohash
+    /// Used to determine if a subdomain should be treated as a geohash scope
+    /// or a regular team/group name
+    fn is_geohash_subdomain(subdomain: &str) -> bool {
+        // Must be valid geohash and use strict validation to ensure it's geographic
+        is_valid_geohash_strict(subdomain)
+    }
 
     #[test]
     fn test_valid_geohash_basic() {
