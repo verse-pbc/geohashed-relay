@@ -2492,7 +2492,6 @@ checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 [[package]]
 name = "relay_builder"
 version = "0.5.0-alpha.1"
-source = "git+https://github.com/verse-pbc/relay_builder?branch=optimize-lock-usage#7f74eed27fefaa24134b1e8ee2ff63d0f2d881f8"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3735,7 +3734,6 @@ dependencies = [
 [[package]]
 name = "websocket_builder"
 version = "1.1.0-alpha.1"
-source = "git+https://github.com/verse-pbc/websocket_builder#119f33ab1f0060162c4ec82b11154c8df26aa15d"
 dependencies = [
  "anyhow",
  "axum",

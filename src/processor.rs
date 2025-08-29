@@ -62,6 +62,16 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
             nostr_lmdb::Scope::Default => None,
         };
         
+        // If we're on a subdomain that's not a valid geohash, reject all events
+        if let Some(subdomain) = current_subdomain {
+            if !crate::geohash_utils::is_valid_geohash(subdomain) {
+                return Err(RelayError::restricted(format!(
+                    "restricted: '{}' is not a valid geohash subdomain",
+                    subdomain
+                )));
+            }
+        }
+        
         // Check if event has a geohash tag
         if let Some(first_geohash) = geohash_tags.first() {
             // Event has a geohash tag - check if we're on the correct subdomain
