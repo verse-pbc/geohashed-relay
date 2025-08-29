@@ -3,52 +3,28 @@ use nostr_sdk::prelude::*;
 use parking_lot::RwLock;
 use relay_builder::{EventContext, EventProcessor, StoreCommand, Error as RelayError};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use std::time::Instant;
+use tracing::{debug, info};
 use crate::geohash_utils::extract_geohash_tags;
 
-/// Per-connection state for rate limiting and tracking
+/// Per-connection state for tracking
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionState {
     pub events_sent: u64,
     pub first_event_time: Option<Instant>,
-    pub rate_limit_info: RateLimitInfo,
     pub subdomain_info: Option<String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct RateLimitInfo {
-    pub events_received: u32,
-    pub window_start: Instant,
-}
-
-impl Default for RateLimitInfo {
-    fn default() -> Self {
-        Self {
-            events_received: 0,
-            window_start: Instant::now(),
-        }
-    }
-}
 
 /// Multi-tenant event processor with geohash-based location routing
 #[derive(Debug, Clone)]
 pub struct GeohashedEventProcessor {
-    events_per_minute: u32,
 }
 
 impl GeohashedEventProcessor {
-    pub fn new(
-        events_per_minute: u32,
-    ) -> Self {
+    pub fn new() -> Self {
         Self {
-            events_per_minute,
         }
-    }
-    
-    fn get_rate_limit(&self, _subdomain: &nostr_lmdb::Scope) -> u32 {
-        // Same rate limit for all scopes
-        self.events_per_minute
     }
 }
 
@@ -57,42 +33,18 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         &self,
         event: Event,
         custom_state: Arc<RwLock<ConnectionState>>,
-        context: EventContext<'_>,
+        context: &EventContext,
     ) -> Result<Vec<StoreCommand>, RelayError> {
-        // Rate limiting
+        // Initialize connection state if needed
         let mut state = custom_state.write();
         let now = Instant::now();
         
-        // Initialize connection state if needed
         if state.first_event_time.is_none() {
             state.first_event_time = Some(now);
-            state.subdomain_info = match &context.subdomain {
+            state.subdomain_info = match context.subdomain.as_ref() {
                 nostr_lmdb::Scope::Named { name, .. } => Some(name.clone()),
                 nostr_lmdb::Scope::Default => None,
             };
-            state.rate_limit_info.window_start = now;
-        }
-        
-        // Reset rate limit window if needed
-        if now.duration_since(state.rate_limit_info.window_start) > Duration::from_secs(60) {
-            state.rate_limit_info.events_received = 0;
-            state.rate_limit_info.window_start = now;
-        }
-        
-        // Check rate limit
-        state.rate_limit_info.events_received += 1;
-        let limit = self.get_rate_limit(&context.subdomain);
-        
-        if state.rate_limit_info.events_received > limit {
-            warn!(
-                "Rate limit exceeded for pubkey {}: {} events in window (limit: {})",
-                event.pubkey,
-                state.rate_limit_info.events_received,
-                limit
-            );
-            return Err(RelayError::restricted(
-                format!("rate limit exceeded: max {} events per minute", limit)
-            ));
         }
         
         // Track events sent
@@ -105,7 +57,7 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         let geohash_tags = extract_geohash_tags(&tags);
         
         // Extract the current subdomain name
-        let current_subdomain = match &context.subdomain {
+        let current_subdomain = match context.subdomain.as_ref() {
             nostr_lmdb::Scope::Named { name, .. } => Some(name.as_str()),
             nostr_lmdb::Scope::Default => None,
         };
@@ -127,7 +79,7 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
                 );
                 Ok(vec![StoreCommand::SaveSignedEvent(
                     Box::new(event),
-                    context.subdomain.clone(),
+                    (*context.subdomain).clone(),
                     None,
                 )])
             } else {
@@ -163,7 +115,7 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
             );
             Ok(vec![StoreCommand::SaveSignedEvent(
                 Box::new(event),
-                context.subdomain.clone(),
+                (*context.subdomain).clone(),
                 None,
             )])
         }
@@ -173,7 +125,7 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         &self,
         _event: &Event,
         _custom_state: Arc<RwLock<ConnectionState>>,
-        _context: EventContext<'_>,
+        _context: &EventContext,
     ) -> Result<bool, RelayError> {
         // Event is visible to all
         Ok(true)
@@ -183,7 +135,7 @@ impl EventProcessor<ConnectionState> for GeohashedEventProcessor {
         &self,
         filters: &[Filter],
         _custom_state: Arc<RwLock<ConnectionState>>,
-        _context: EventContext<'_>,
+        _context: &EventContext,
     ) -> Result<(), RelayError> {
         // Basic filter validation
         for filter in filters {

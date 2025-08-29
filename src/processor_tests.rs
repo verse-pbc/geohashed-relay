@@ -3,9 +3,7 @@ mod tests {
     use super::super::*;
 
     fn create_test_processor() -> GeohashedEventProcessor {
-        GeohashedEventProcessor::new(
-            100,                    // events_per_minute
-        )
+        GeohashedEventProcessor::new()
     }
 
     async fn create_event_with_geohash(geohash: &str) -> Event {
@@ -27,13 +25,11 @@ mod tests {
             .unwrap()
     }
 
-    fn create_test_context(subdomain: nostr_lmdb::Scope) -> EventContext<'static> {
+    fn create_test_context(subdomain: nostr_lmdb::Scope) -> EventContext {
         let keys = Keys::generate();
-        let relay_pubkey = Box::leak(Box::new(keys.public_key()));
-        let subdomain_ref = Box::leak(Box::new(subdomain));
         EventContext {
-            relay_pubkey,
-            subdomain: subdomain_ref,
+            relay_pubkey: keys.public_key(),
+            subdomain: Arc::new(subdomain),
             authed_pubkey: None,
         }
     }
@@ -48,7 +44,7 @@ mod tests {
         let context = create_test_context(nostr_lmdb::Scope::Default);
         
         // Process event - should return error since root doesn't accept geotagged events
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_err());
         
         // Verify error message
@@ -70,7 +66,7 @@ mod tests {
         let context = create_test_context(nostr_lmdb::Scope::named("drt2z").unwrap());
         
         // Process event - should store since we're on the correct subdomain
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
@@ -101,7 +97,7 @@ mod tests {
         let context = create_test_context(subdomain_scope.clone());
         
         // Process event
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
@@ -139,7 +135,7 @@ mod tests {
         let context = create_test_context(nostr_lmdb::Scope::named("drt2z").unwrap());
         
         // Process event
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
@@ -168,7 +164,7 @@ mod tests {
         let context = create_test_context(nostr_lmdb::Scope::named("9q8yy").unwrap());
         
         // Process event - should return error since wrong subdomain
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_err());
         
         // Verify error message guides to correct subdomain
@@ -179,21 +175,6 @@ mod tests {
         }
     }
     
-    #[test]
-    fn test_uniform_rate_limiting() {
-        let processor = GeohashedEventProcessor::new(
-            100,  // rate for all scopes
-        );
-        
-        // All scopes get the same rate
-        let geohash_scope = nostr_lmdb::Scope::named("drt2z").unwrap();
-        assert_eq!(processor.get_rate_limit(&geohash_scope), 100);
-        
-        let regular_scope = nostr_lmdb::Scope::named("team1").unwrap();
-        assert_eq!(processor.get_rate_limit(&regular_scope), 100);
-        
-        assert_eq!(processor.get_rate_limit(&nostr_lmdb::Scope::Default), 100);
-    }
 
     #[tokio::test]
     async fn test_invalid_geohash_tag_ignored() {
@@ -214,7 +195,7 @@ mod tests {
         let context = create_test_context(subdomain_scope.clone());
         
         // Process event
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
