@@ -1,38 +1,31 @@
 replicaCount: 1
-
 image:
   repository: ghcr.io/verse-pbc/geohashed-relay
-  tag: "" # Uses Chart.AppVersion when empty
+  tag: "0.1.20250829-1505-48b8528" # Uses Chart.AppVersion when empty
   pullPolicy: Always
-
 # StatefulSet configuration
 statefulset:
   serviceName: geohashed-relay
-
 # Persistent storage for LMDB
 persistence:
   enabled: true
   storageClass: "" # Use default storage class
   size: 20Gi
   accessMode: ReadWriteOnce
-
 # Pod Disruption Budget
 pdb:
   minAvailable: 1
-
 # Autoscaling (disabled for LMDB single-writer constraint)
 autoscaling:
   enabled: false
   minReplicas: 1
   maxReplicas: 1
   targetCPUUtilizationPercentage: 80
-
 # Service configuration
 service:
   type: ClusterIP
   port: 80
   targetPort: 8080
-
 # Ingress configuration
 ingress:
   enabled: true
@@ -41,7 +34,6 @@ ingress:
   tls:
     enabled: true
     secretName: geohashed-relay-tls
-
 # Resource limits and requests
 resources:
   requests:
@@ -50,7 +42,6 @@ resources:
   limits:
     memory: "2Gi"
     cpu: "1000m"
-
 # Environment variables
 # Note: RELAY_PRIVATE_KEY is provided via sealed secret (see SECRETS.md)
 env:
@@ -62,7 +53,6 @@ env:
   EVENTS_PER_MINUTE: "30"
   REQUIRE_AUTH_FOR_WRITE: "false"
   REQUIRE_AUTH_FOR_READ: "false"
-
 # Health check configuration
 healthCheck:
   enabled: true
@@ -71,7 +61,6 @@ healthCheck:
   timeoutSeconds: 5
   successThreshold: 1
   failureThreshold: 3
-
 # Security context
 securityContext:
   runAsNonRoot: true
