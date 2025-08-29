@@ -37,19 +37,15 @@ async fn create_regular_event(content: &str) -> Event {
 
 /// Helper to create a test processor
 fn create_test_processor() -> GeohashedEventProcessor {
-    GeohashedEventProcessor::new(
-        100,
-    )
+    GeohashedEventProcessor::new()
 }
 
 /// Helper to create an EventContext
-fn create_context(scope: Scope) -> EventContext<'static> {
+fn create_context(scope: Scope) -> EventContext {
     let keys = Keys::generate();
-    let relay_pubkey = Box::leak(Box::new(keys.public_key()));
-    let subdomain_ref = Box::leak(Box::new(scope));
     EventContext {
-        relay_pubkey,
-        subdomain: subdomain_ref,
+        relay_pubkey: keys.public_key(),
+        subdomain: Arc::new(scope),
         authed_pubkey: None,
     }
 }
@@ -63,7 +59,7 @@ async fn test_geohash_rejection_and_acceptance() {
     let state = Arc::new(RwLock::new(ConnectionState::default()));
     let root_context = create_context(Scope::Default);
     
-    let result = processor.handle_event(event_with_geo.clone(), state.clone(), root_context).await;
+    let result = processor.handle_event(event_with_geo.clone(), state.clone(), &root_context).await;
     assert!(result.is_err(), "Geotagged event should be rejected at root");
     
     if let Err(e) = result {
@@ -74,7 +70,7 @@ async fn test_geohash_rejection_and_acceptance() {
     
     // Test 2: Same event posted from a different subdomain - should be rejected
     let team_context = create_context(Scope::named("team1").unwrap());
-    let result2 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), team_context).await;
+    let result2 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), &team_context).await;
     assert!(result2.is_err(), "Event should be rejected on non-matching subdomain");
     
     if let Err(e) = result2 {
@@ -85,7 +81,7 @@ async fn test_geohash_rejection_and_acceptance() {
     
     // Test 3: Event posted to matching subdomain - should be accepted and stored
     let matching_context = create_context(Scope::named("drt2z").unwrap());
-    let result3 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), matching_context).await;
+    let result3 = processor.handle_event(event_with_geo.clone(), Arc::new(RwLock::new(ConnectionState::default())), &matching_context).await;
     assert!(result3.is_ok(), "Event should be accepted on matching subdomain");
     
     let commands = result3.unwrap();
@@ -121,7 +117,7 @@ async fn test_events_without_geohash_stay_in_connection_scope() {
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         let context = create_context(connection_scope.clone());
         
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_ok());
         
         let commands = result.unwrap();
@@ -164,21 +160,21 @@ async fn test_multiple_geohash_tags_use_first_only() {
     let state = Arc::new(RwLock::new(ConnectionState::default()));
     let context = create_context(Scope::Default);
     
-    let result = processor.handle_event(event.clone(), state, context).await;
+    let result = processor.handle_event(event.clone(), state, &context).await;
     assert!(result.is_err(), "Event with geohash should be rejected at root");
     
     // Test 2: Posted to matching first geohash subdomain - should succeed
     let state2 = Arc::new(RwLock::new(ConnectionState::default()));
     let context2 = create_context(Scope::named("drt2z").unwrap());
     
-    let result2 = processor.handle_event(event.clone(), state2, context2).await;
+    let result2 = processor.handle_event(event.clone(), state2, &context2).await;
     assert!(result2.is_ok(), "Event should be accepted on first geohash subdomain");
     
     // Test 3: Posted to second geohash subdomain - should be rejected
     let state3 = Arc::new(RwLock::new(ConnectionState::default()));
     let context3 = create_context(Scope::named("9q8yy").unwrap());
     
-    let result3 = processor.handle_event(event, state3, context3).await;
+    let result3 = processor.handle_event(event, state3, &context3).await;
     assert!(result3.is_err(), "Event should be rejected on non-first geohash subdomain");
 }
 
@@ -202,7 +198,7 @@ async fn test_invalid_geohash_falls_back_to_connection_scope() {
     let team_scope = Scope::named("team1").unwrap();
     let context = create_context(team_scope);
     
-    let result = processor.handle_event(event, state, context).await;
+    let result = processor.handle_event(event, state, &context).await;
     assert!(result.is_ok());
     
     let commands = result.unwrap();
@@ -243,14 +239,14 @@ async fn test_geohash_scopes_are_isolated() {
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         let context = create_context(Scope::Default);
         
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         assert!(result.is_err(), "Geotagged event should be rejected at root");
         
         // Test 2: Accepted at correct subdomain
         let state2 = Arc::new(RwLock::new(ConnectionState::default()));
         let context2 = create_context(Scope::named(expected_geohash).unwrap());
         
-        let result2 = processor.handle_event(event.clone(), state2, context2).await;
+        let result2 = processor.handle_event(event.clone(), state2, &context2).await;
         assert!(result2.is_ok(), "Event should be accepted on matching subdomain");
         
         let commands = result2.unwrap();
@@ -288,7 +284,7 @@ async fn test_same_event_different_endpoints_same_storage() {
         let state = Arc::new(RwLock::new(ConnectionState::default()));
         let context = create_context(endpoint.clone());
         
-        let result = processor.handle_event(event.clone(), state, context).await;
+        let result = processor.handle_event(event.clone(), state, &context).await;
         
         if should_succeed {
             assert!(result.is_ok(), "Event should be accepted on {}", description);

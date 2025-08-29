@@ -9,14 +9,15 @@ use axum::{
     routing::get,
     Router,
 };
-use websocket_builder::{WebSocketUpgrade, handle_upgrade, HandlerFactory};
+use relay_builder::{WebSocketUpgrade, handle_upgrade, HandlerFactory};
 use relay_builder::ScopeConfig;
 use nostr_sdk::prelude::*;
 use relay_builder::{
     RelayBuilder, RelayConfig as BuilderConfig,
-    middlewares::{NostrLoggerMiddleware, Nip40ExpirationMiddleware},
+    middlewares::{NostrLoggerMiddleware, Nip40ExpirationMiddleware, RateLimitMiddleware},
 };
-use std::{net::SocketAddr, sync::Arc};
+use governor::Quota;
+use std::{net::SocketAddr, sync::Arc, num::NonZeroU32};
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::{
@@ -64,10 +65,8 @@ async fn main() -> Result<()> {
     };
     info!("Relay public key: {}", keys.public_key());
     
-    // Create the event processor
-    let processor = GeohashedEventProcessor::new(
-        config.events_per_minute,
-    );
+    // Create the event processor (rate limiting now handled by middleware)
+    let processor = GeohashedEventProcessor::new();
     
     // Configure the relay with subdomain support
     let mut relay_config = BuilderConfig::new(
@@ -101,6 +100,9 @@ async fn main() -> Result<()> {
     let handler = builder.build_with(|chain| {
         chain
             .with(NostrLoggerMiddleware::new())
+            .with(RateLimitMiddleware::new(
+                Quota::per_minute(NonZeroU32::new(config.events_per_minute).unwrap())
+            ))
             .with(Nip40ExpirationMiddleware)
     }).await?;
     

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Core dependencies
-relay_builder = { git = "https://github.com/verse-pbc/relay_builder" }
+relay_builder = { git = "https://github.com/verse-pbc/relay_builder", branch = "optimize-lock-usage" }
 websocket_builder = { git = "https://github.com/verse-pbc/websocket_builder" }
 nostr-sdk = { git = "https://github.com/verse-pbc/nostr", features = ["all-nips"] }
 nostr = { git = "https://github.com/verse-pbc/nostr", features = ["std"] }
@@ -37,6 +37,9 @@ url = "2"
 
 # Geohash
 geohash = "0.13"
+
+# Rate limiting
+governor = "0.10"
 
 [lib]
 name = "geohashed_relay"
