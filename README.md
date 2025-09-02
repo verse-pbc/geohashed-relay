@@ -1,6 +1,6 @@
 # Geohashed Relay
 
-A Nostr relay that enforces geohash-based routing with complete data isolation per location.
+A Nostr relay that enforces geohash-based routing with complete data isolation per location. Designed for location-based messaging (kind 20000) and geotagged notes (kind 1).
 
 ## How It Works
 
@@ -8,14 +8,27 @@ A Nostr relay that enforces geohash-based routing with complete data isolation p
 - Only valid geohash strings allowed as subdomains (prevents arbitrary subdomain creation)
 - Each geohash scope is completely isolated - no hierarchical queries
 
+### Common Event Kinds Using Geohash
+
+- **Kind 20000**: Ephemeral location messages (e.g., BitChat proximity chat)
+- **Kind 1**: Geotagged text notes
+- **Kind 0**: User metadata with location (rare)
+
 ### Examples
 
 ```javascript
-// Event with geohash tag MUST go to matching subdomain
+// Location-based message (kind 20000) MUST go to matching subdomain
+{
+  kind: 20000,
+  tags: [["g", "drt2z"]],  // San Francisco geohash
+  content: "Anyone nearby for coffee?"
+}
+
+// Geotagged note (kind 1)
 {
   kind: 1,
-  tags: [["g", "drt2z"]],  // San Francisco geohash
-  content: "SF meetup"
+  tags: [["g", "drt2z"]],
+  content: "Beautiful sunset at Ocean Beach!"
 }
 // ❌ Rejected at ws://relay.com → "use wss://drt2z.relay.com"
 // ✅ Accepted at ws://drt2z.relay.com
