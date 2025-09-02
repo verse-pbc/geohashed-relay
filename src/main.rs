@@ -381,9 +381,8 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                                     var gh = feature.properties.geohash;
                                     var isCenter = feature.properties.isCenter;
                                     
-                                    // Add permanent label for all cells showing full domain
-                                    var label = gh + '.{}';
-                                    layer.bindTooltip(label, {{
+                                    // Add permanent label for all cells
+                                    layer.bindTooltip(gh, {{
                                         permanent: true,
                                         direction: 'center',
                                         className: isCenter ? 'geohash-label-center' : 'geohash-label'
@@ -451,7 +450,7 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                 </div>"#,
                 center_decoded.0.y, center_decoded.0.x, zoom,
                 sub,
-                domain, domain
+                domain
             ))
         } else {
             None
@@ -470,7 +469,7 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                     "Events without any geohash tag".to_string(),
                 ],
                 vec!["Events with different geohash tags".to_string()],
-                None,
+                None::<String>,
                 format!(
                     r#"<span class="comment"># Post location-based message (ephemeral)</span>
 nak event -k 20000 -c "Hello from {}!" -t g={} wss://{}.{}
@@ -488,23 +487,29 @@ nak req -l 10 wss://{}.{}"#,
             )
         }
         Some(sub) => {
-            // Invalid subdomain
+            // Invalid subdomain - show as root relay with note
             (
-                "Invalid Subdomain".to_string(),
-                "Invalid Subdomain".to_string(),
-                r#"<span class="badge error">INVALID</span>"#.to_string(),
-                format!("'{}' is not a valid geohash. Only valid geohash strings can be used as subdomains.", sub),
-                vec![],
-                vec![],
-                Some(format!(
-                    r#"<div class="error-box">
-                        <h3>⚠️ Invalid Subdomain</h3>
-                        <p>'{}' is not a valid geohash.</p>
-                        <p>Only valid geohash strings can be used as subdomains.</p>
-                    </div>"#,
-                    sub
-                )),
+                format!("Nostr Relay"),
+                format!("Nostr Relay"),
                 String::new(),
+                format!("A Nostr relay with geohash-based data isolation. Note: '{}' is not a valid geohash subdomain.", sub),
+                vec!["Events without geohash tags".to_string()],
+                vec![
+                    r#"Events with ["g", "geohash"] tags"#.to_string(),
+                    "Must be posted to matching subdomain".to_string(),
+                ],
+                None::<String>,
+                format!(r#"<span class="comment"># Post event without geohash tag</span>
+nak event -c "Global announcement" wss://{}
+
+<span class="comment"># Location event (requires valid geohash subdomain)</span>
+nak event -k 20000 -c "SF meetup" -t g=drt2z wss://{}
+<span class="comment"># Error: use wss://drt2z.{} instead</span>
+
+<span class="comment"># Query all events from root scope</span>
+nak req -l 10 wss://{}"#,
+                    domain, domain, domain, domain
+                )
             )
         }
         None => {
@@ -519,7 +524,7 @@ nak req -l 10 wss://{}.{}"#,
                     r#"Events with ["g", "geohash"] tags"#.to_string(),
                     "Must be posted to matching subdomain".to_string(),
                 ],
-                None,
+                None::<String>,
                 format!(r#"<span class="comment"># Post event without geohash tag</span>
 nak event -c "Global announcement" wss://{}
 
