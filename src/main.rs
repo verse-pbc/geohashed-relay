@@ -193,13 +193,132 @@ where
             handle_upgrade(ws, addr, h).await
         },
         None => {
-            // Return relay info for NIP-11 if requested
+            // Extract subdomain from Host header for the info page
+            let subdomain = headers
+                .get("host")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|host| {
+                    // Extract subdomain if it exists
+                    let parts: Vec<&str> = host.split('.').collect();
+                    if parts.len() > 2 || (parts.len() == 2 && !parts[0].contains(':')) {
+                        Some(parts[0].to_string())
+                    } else {
+                        None
+                    }
+                });
+            
+            // Generate informative HTML based on current scope
+            let html = generate_info_html(subdomain.as_deref());
             Response::builder()
                 .status(200)
-                .body("Scoped Relay".into())
+                .header("content-type", "text/html; charset=utf-8")
+                .body(html.into())
                 .unwrap()
         }
     }
+}
+
+fn generate_info_html(subdomain: Option<&str>) -> String {
+    let (title, scope_info, rules) = match subdomain {
+        Some(sub) if crate::geohash_utils::is_valid_geohash(sub) => {
+            (
+                format!("Geohash: {}", sub),
+                format!("Connected to geohash scope: <code>{}</code>", sub),
+                format!(
+                    r#"<h3>Accepted Events:</h3>
+                    <ul>
+                        <li>✅ Events with <code>["g", "{}"]</code> tag</li>
+                        <li>✅ Events without any geohash tag</li>
+                    </ul>
+                    <h3>Rejected Events:</h3>
+                    <ul>
+                        <li>❌ Events with different geohash tags</li>
+                    </ul>"#,
+                    sub
+                ),
+            )
+        }
+        Some(sub) => {
+            // Invalid subdomain
+            (
+                "Invalid Subdomain".to_string(),
+                format!("Error: <code>{}</code> is not a valid geohash", sub),
+                r#"<p style="color: red;">This subdomain is not allowed. Only valid geohash strings can be used as subdomains.</p>"#.to_string(),
+            )
+        }
+        None => {
+            // Root domain
+            (
+                "Geohashed Relay".to_string(),
+                "Connected to root relay".to_string(),
+                r#"<h3>Accepted Events:</h3>
+                <ul>
+                    <li>✅ Events without geohash tags</li>
+                </ul>
+                <h3>Rejected Events:</h3>
+                <ul>
+                    <li>❌ All events with <code>["g", "geohash"]</code> tags</li>
+                    <li style="margin-left: 20px;">→ Must be posted to their matching subdomain</li>
+                </ul>"#.to_string(),
+            )
+        }
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }}
+        h1 {{ color: #333; }}
+        code {{
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }}
+        .connection {{
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }}
+        ul {{ margin: 10px 0; }}
+        li {{ margin: 5px 0; }}
+    </style>
+</head>
+<body>
+    <h1>{}</h1>
+    <p>{}</p>
+    
+    <div class="connection">
+        <h3>WebSocket Connection:</h3>
+        <code>wss://{}hashstr.com</code>
+    </div>
+    
+    {}
+    
+    <hr style="margin-top: 40px;">
+    <small>
+        <p>This is a Nostr relay with enforced geohash-based data isolation.</p>
+        <p>Each geohash represents a completely separate data scope.</p>
+    </small>
+</body>
+</html>"#,
+        title,
+        title,
+        scope_info,
+        subdomain.map(|s| format!("{}.", s)).unwrap_or_default(),
+        rules
+    )
 }
 
 async fn health_check() -> &'static str {

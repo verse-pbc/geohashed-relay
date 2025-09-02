@@ -1100,7 +1100,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "websocket_builder",
 ]
 
 [[package]]
@@ -2492,6 +2491,7 @@ checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 [[package]]
 name = "relay_builder"
 version = "0.5.0-alpha.1"
+source = "git+https://github.com/verse-pbc/relay_builder?branch=optimize-lock-usage#54fdebd6af84b44f2e8bccff6d67877d387e3317"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3729,18 +3729,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e8983c3ab33d6fb807cfcdad2491c4ea8cbc8ed839181c7dfd9c67c83e261b2"
 dependencies = [
  "rustls-pki-types",
-]
-
-[[package]]
-name = "websocket_builder"
-version = "1.1.0-alpha.1"
-dependencies = [
- "anyhow",
- "axum",
- "flume",
- "futures-util",
- "tokio",
- "tracing",
 ]
 
 [[package]]
