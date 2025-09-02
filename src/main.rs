@@ -193,22 +193,25 @@ where
             handle_upgrade(ws, addr, h).await
         },
         None => {
-            // Extract subdomain from Host header for the info page
-            let subdomain = headers
+            // Extract subdomain and domain from Host header for the info page
+            let host_str = headers
                 .get("host")
                 .and_then(|h| h.to_str().ok())
-                .and_then(|host| {
-                    // Extract subdomain if it exists
-                    let parts: Vec<&str> = host.split('.').collect();
-                    if parts.len() > 2 || (parts.len() == 2 && !parts[0].contains(':')) {
-                        Some(parts[0].to_string())
-                    } else {
-                        None
-                    }
-                });
+                .unwrap_or("localhost");
+            
+            let parts: Vec<&str> = host_str.split('.').collect();
+            let (subdomain, domain) = if parts.len() > 2 || (parts.len() == 2 && !parts[0].contains(':')) {
+                // Has subdomain
+                let sub = parts[0].to_string();
+                let dom = parts[1..].join(".");
+                (Some(sub), dom)
+            } else {
+                // No subdomain, just domain
+                (None, host_str.to_string())
+            };
             
             // Generate informative HTML based on current scope
-            let html = generate_info_html(subdomain.as_deref());
+            let html = generate_info_html(subdomain.as_deref(), &domain);
             Response::builder()
                 .status(200)
                 .header("content-type", "text/html; charset=utf-8")
@@ -218,13 +221,250 @@ where
     }
 }
 
-fn generate_info_html(subdomain: Option<&str>) -> String {
-    let (title, heading, badge, accepted_rules, rejected_rules, error_section, usage_examples) = match subdomain {
+fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
+    // Common Nostr event kinds that use geohash tags:
+    // - Kind 20000: Ephemeral geohash events (location-based messages, e.g., BitChat)
+    // - Kind 1: Text notes (regular posts with optional location tagging)
+    // - Kind 0: Metadata (profiles with location, rare)
+    
+    // Generate map HTML for geohash subdomains with clickable grid
+    let map_section = subdomain.and_then(|sub| {
+        if crate::geohash_utils::is_valid_geohash(sub) {
+            // Get center coordinates and precision
+            let center_decoded = geohash::decode(sub).ok()?;
+            let precision = sub.len();
+            
+            // Calculate zoom level
+            let zoom = match precision {
+                1 => 2,
+                2 => 4,
+                3 => 7,
+                4 => 10,
+                5 => 12,
+                6 => 14,
+                7 => 18,
+                _ => 16,
+            };
+            
+            Some(format!(
+                r#"<div class="section">
+                    <div class="section-title">Geohash Grid Map</div>
+                    <div id="map" style="height: 400px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);"></div>
+                    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                    <script>
+                        // Polyfill for module to avoid error
+                        if (typeof module === 'undefined') {{
+                            window.module = {{ exports: {{}} }};
+                        }}
+                    </script>
+                    <script src="https://cdn.jsdelivr.net/npm/ngeohash@0.6.3/main.js"></script>
+                    <script>
+                        var map = L.map('map').setView([{}, {}], {});
+                        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                            attribution: '© OpenStreetMap contributors'
+                        }}).addTo(map);
+                        
+                        var currentGeohash = '{}';
+                        var geohashLayer = null;
+                        
+                        function generateGeohashGrid() {{
+                            if (geohashLayer) {{
+                                map.removeLayer(geohashLayer);
+                            }}
+                            
+                            var bounds = map.getBounds();
+                            var zoom = map.getZoom();
+                            
+                            // Determine precision based on zoom level
+                            // Adjust precision dynamically based on zoom to avoid rendering issues
+                            var precision;
+                            
+                            // Calculate precision based on zoom level
+                            // Lower zoom = lower precision (coarse grid)
+                            // Higher zoom = higher precision (fine grid)
+                            if (zoom < 3) precision = 1;
+                            else if (zoom < 6) precision = 2;
+                            else if (zoom < 9) precision = 3;
+                            else if (zoom < 12) precision = 4;
+                            else if (zoom < 15) precision = 5;
+                            else if (zoom < 18) precision = 6;
+                            else precision = 7;
+                            
+                            // Ensure we don't exceed max precision
+                            precision = Math.min(precision, 7);
+                            
+                            // Get all geohashes that intersect with the visible area
+                            var geohashSet = new Set();
+                            
+                            // Get corner geohashes
+                            var sw = geohash.encode(bounds.getSouth(), bounds.getWest(), precision);
+                            var ne = geohash.encode(bounds.getNorth(), bounds.getEast(), precision);
+                            
+                            // Decode to get the actual bounds of these geohashes
+                            var swBounds = geohash.decode_bbox(sw);
+                            var neBounds = geohash.decode_bbox(ne);
+                            
+                            // Calculate how many geohash cells we need to cover
+                            var cellSize = swBounds[3] - swBounds[1]; // longitude width of one cell
+                            var cellHeight = swBounds[2] - swBounds[0]; // latitude height of one cell
+                            
+                            // Generate all geohashes in the grid
+                            // Limit total cells to prevent performance issues
+                            var maxCells = 200;
+                            var cellCount = 0;
+                            
+                            for (var lat = swBounds[0]; lat <= neBounds[2] + cellHeight && cellCount < maxCells; lat += cellHeight * 0.99) {{
+                                for (var lng = swBounds[1]; lng <= neBounds[3] + cellSize && cellCount < maxCells; lng += cellSize * 0.99) {{
+                                    var gh = geohash.encode(lat, lng, precision);
+                                    if (gh) {{
+                                        var ghBounds = geohash.decode_bbox(gh);
+                                        // Check if this geohash intersects with the viewport
+                                        if (ghBounds[2] >= bounds.getSouth() && ghBounds[0] <= bounds.getNorth() &&
+                                            ghBounds[3] >= bounds.getWest() && ghBounds[1] <= bounds.getEast()) {{
+                                            geohashSet.add(gh);
+                                            cellCount++;
+                                        }}
+                                    }}
+                                }}
+                            }}
+                            
+                            // Create GeoJSON features
+                            var features = [];
+                            geohashSet.forEach(function(gh) {{
+                                var bbox = geohash.decode_bbox(gh);
+                                // bbox is [minlat, minlon, maxlat, maxlon]
+                                features.push({{
+                                    type: 'Feature',
+                                    properties: {{
+                                        geohash: gh,
+                                        isCenter: gh === currentGeohash
+                                    }},
+                                    geometry: {{
+                                        type: 'Polygon',
+                                        coordinates: [[
+                                            [bbox[1], bbox[0]],  // SW: minlon, minlat
+                                            [bbox[3], bbox[0]],  // SE: maxlon, minlat
+                                            [bbox[3], bbox[2]],  // NE: maxlon, maxlat
+                                            [bbox[1], bbox[2]],  // NW: minlon, maxlat
+                                            [bbox[1], bbox[0]]   // close polygon
+                                        ]]
+                                    }}
+                                }});
+                            }});
+                            
+                            // Add layer to map
+                            geohashLayer = L.geoJSON({{
+                                type: 'FeatureCollection',
+                                features: features
+                            }}, {{
+                                style: function(feature) {{
+                                    if (feature.properties.isCenter) {{
+                                        return {{
+                                            fillColor: '#4ade80',
+                                            weight: 2,
+                                            opacity: 1,
+                                            color: '#4ade80',
+                                            fillOpacity: 0.3
+                                        }};
+                                    }} else {{
+                                        return {{
+                                            fillColor: '#60a5fa',
+                                            weight: 0.5,
+                                            opacity: 0.7,
+                                            color: '#60a5fa',
+                                            fillOpacity: 0.05
+                                        }};
+                                    }}
+                                }},
+                                onEachFeature: function(feature, layer) {{
+                                    var gh = feature.properties.geohash;
+                                    var isCenter = feature.properties.isCenter;
+                                    
+                                    // Add permanent label for all cells showing full domain
+                                    var label = gh + '.{}';
+                                    layer.bindTooltip(label, {{
+                                        permanent: true,
+                                        direction: 'center',
+                                        className: isCenter ? 'geohash-label-center' : 'geohash-label'
+                                    }});
+                                    
+                                    // Make clickable - always navigate to subdomain
+                                    layer.on('click', function(e) {{
+                                        if (!isCenter) {{
+                                            window.location.href = 'https://' + gh + '.{}';
+                                        }}
+                                    }});
+                                    
+                                    // Add hover effects
+                                    if (!isCenter) {{
+                                        layer.on('mouseover', function(e) {{
+                                            this.setStyle({{
+                                                fillOpacity: 0.2,
+                                                weight: 1.5
+                                            }});
+                                        }});
+                                        
+                                        layer.on('mouseout', function(e) {{
+                                            this.setStyle({{
+                                                fillOpacity: 0.05,
+                                                weight: 0.5
+                                            }});
+                                        }});
+                                    }}
+                                }}
+                            }}).addTo(map);
+                        }}
+                        
+                        // Generate initial grid
+                        generateGeohashGrid();
+                        
+                        // Regenerate on map move/zoom
+                        map.on('moveend', function() {{
+                            generateGeohashGrid();
+                        }});
+                    </script>
+                    <style>
+                        .geohash-label {{
+                            background: rgba(96, 165, 250, 0.9);
+                            border: none;
+                            color: white;
+                            font-weight: 600;
+                            font-size: 10px;
+                            padding: 1px 4px;
+                            white-space: nowrap;
+                        }}
+                        .geohash-label-center {{
+                            background: #4ade80;
+                            border: none;
+                            color: white;
+                            font-weight: bold;
+                            font-size: 12px;
+                            padding: 3px 8px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                            white-space: nowrap;
+                        }}
+                        .leaflet-interactive:hover {{
+                            cursor: pointer;
+                        }}
+                    </style>
+                </div>"#,
+                center_decoded.0.y, center_decoded.0.x, zoom,
+                sub,
+                domain, domain
+            ))
+        } else {
+            None
+        }
+    }).unwrap_or_default();
+    
+    let (title, heading, badge, description, accepted_rules, rejected_rules, error_section, usage_examples) = match subdomain {
         Some(sub) if crate::geohash_utils::is_valid_geohash(sub) => {
             (
-                format!("Geohash Relay: {}", sub.to_uppercase()),
-                format!("Geohash Scope: {}", sub.to_uppercase()),
-                format!(r#"<span class="badge geohash">{}</span>"#, sub.to_uppercase()),
+                format!("{} Nostr Relay", sub),
+                format!(r#"Nostr Relay <span style="color: #4ade80; font-weight: 600;">[{}]</span>"#, sub),
+                String::new(),  // No badge
+                format!(r#"A Nostr relay that rejects events with geohash tags not matching <code style="color: #4ade80;">{}</code>. Events without geohash tags are accepted."#, sub),
                 vec![
                     format!(r#"Events with ["g", "{}"] tag"#, sub),
                     "Events without any geohash tag".to_string(),
@@ -232,18 +472,18 @@ fn generate_info_html(subdomain: Option<&str>) -> String {
                 vec!["Events with different geohash tags".to_string()],
                 None,
                 format!(
-                    r#"# ✅ Post event with matching geohash tag
-nak event -c "Event for {}" -t g={} wss://{}.hashstr.com
+                    r#"<span class="comment"># Post location-based message (ephemeral)</span>
+nak event -k 20000 -c "Hello from {}!" -t g={} wss://{}.{}
 
-# ✅ Post event without geohash tag
-nak event -c "Regular event" wss://{}.hashstr.com
+<span class="comment"># Post event without geohash tag</span>
+nak event -c "Regular event" wss://{}.{}
 
-# ❌ Wrong geohash tag (will be rejected)
-nak event -c "Wrong tag" -t g=other wss://{}.hashstr.com
+<span class="comment"># Wrong geohash tag (will be rejected)</span>
+nak event -c "Wrong tag" -t g=other wss://{}.{}
 
-# Query events from this geohash scope
-nak req -t g={} -l 10 wss://{}.hashstr.com"#,
-                    sub, sub, sub, sub, sub, sub, sub
+<span class="comment"># Query events from this geohash scope</span>
+nak req -l 10 wss://{}.{}"#,
+                    sub, sub, sub, domain, sub, domain, sub, domain, sub, domain
                 ),
             )
         }
@@ -253,6 +493,7 @@ nak req -t g={} -l 10 wss://{}.hashstr.com"#,
                 "Invalid Subdomain".to_string(),
                 "Invalid Subdomain".to_string(),
                 r#"<span class="badge error">INVALID</span>"#.to_string(),
+                format!("'{}' is not a valid geohash. Only valid geohash strings can be used as subdomains.", sub),
                 vec![],
                 vec![],
                 Some(format!(
@@ -269,24 +510,31 @@ nak req -t g={} -l 10 wss://{}.hashstr.com"#,
         None => {
             // Root domain
             (
-                "Geohashed Relay".to_string(),
-                "Geohashed Relay".to_string(),
-                r#"<span class="badge root">ROOT</span>"#.to_string(),
+                format!("Nostr Relay"),
+                format!("Nostr Relay"),
+                String::new(),  // No badge
+                "A Nostr relay with geohash-based data isolation. Events with geohash tags must be posted to their matching subdomain.".to_string(),
                 vec!["Events without geohash tags".to_string()],
                 vec![
                     r#"Events with ["g", "geohash"] tags"#.to_string(),
                     "Must be posted to matching subdomain".to_string(),
                 ],
                 None,
-                r#"# ✅ Post event without geohash tag
-nak event -c "Global announcement" wss://hashstr.com
+                format!(r#"<span class="comment"># Post event without geohash tag</span>
+nak event -c "Global announcement" wss://{}
 
-# ❌ Geotagged event (will be rejected)
-nak event -c "SF meetup" -t g=drt2z wss://hashstr.com
-# Error: use wss://drt2z.hashstr.com instead
+<span class="comment"># Location event (will be rejected - wrong subdomain)</span>
+nak event -k 20000 -c "SF meetup" -t g=drt2z wss://{}
+<span class="comment"># Error: use wss://drt2z.{} instead</span>
 
-# Query all events from root scope
-nak req -l 10 wss://hashstr.com"#.to_string(),
+<span class="comment"># Geotagged note (will be rejected - wrong subdomain)</span>
+nak event -k 1 -c "Beach photo" -t g=9q8yy wss://{}
+<span class="comment"># Error: use wss://9q8yy.{} instead</span>
+
+<span class="comment"># Query all events from root scope</span>
+nak req -l 10 wss://{}"#,
+                    domain, domain, domain, domain, domain, domain
+                ),
             )
         }
     };
@@ -401,8 +649,8 @@ nak req -l 10 wss://hashstr.com"#.to_string(),
         }}
         
         .code-block {{
-            background: #1a1a2e;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #0a0a0f;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 8px;
             padding: 24px;
             overflow-x: auto;
@@ -417,7 +665,7 @@ nak req -l 10 wss://hashstr.com"#.to_string(),
         }}
         
         .comment {{
-            color: #6b7280;
+            color: #4b5563;
         }}
         
         .url {{
@@ -520,8 +768,10 @@ nak req -l 10 wss://hashstr.com"#.to_string(),
         </h1>
         
         <p class="description">
-            A Nostr relay with enforced geohash-based data isolation. Each geohash subdomain is a completely separate data scope with no hierarchical propagation. Events with geohash tags must be posted to their matching subdomain.
+            {}
         </p>
+        
+        {}
         
         {}
         
@@ -542,7 +792,9 @@ nak req -l 10 wss://hashstr.com"#.to_string(),
         title,           // Page <title>
         heading,         // Main heading
         badge,           // Badge (ROOT/GEOHASH/INVALID)
+        description,     // Description of the relay behavior
         error_section.unwrap_or_default(),  // Error section if any
+        map_section,     // Map visualization for geohash
         usage_examples,  // Code examples
         accepted_html,   // Accepted rules
         rejected_html    // Rejected rules

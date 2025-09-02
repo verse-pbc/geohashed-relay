@@ -51,6 +51,35 @@ pub fn extract_geohash_tags(tags: &[Vec<String>]) -> Vec<String> {
         .collect()
 }
 
+/// Get all 8 neighbors of a geohash plus the center geohash itself
+/// Returns a 3x3 grid with the center geohash and its 8 neighbors
+/// Order: [NW, N, NE, W, Center, E, SW, S, SE]
+pub fn get_geohash_grid(center: &str) -> Option<Vec<String>> {
+    use geohash::{Direction, neighbor};
+    
+    if !is_valid_geohash(center) {
+        return None;
+    }
+    
+    let center_lower = center.to_lowercase();
+    
+    // Calculate all neighbors
+    let nw = neighbor(&center_lower, Direction::NW).ok()?;
+    let n = neighbor(&center_lower, Direction::N).ok()?;
+    let ne = neighbor(&center_lower, Direction::NE).ok()?;
+    let w = neighbor(&center_lower, Direction::W).ok()?;
+    let e = neighbor(&center_lower, Direction::E).ok()?;
+    let sw = neighbor(&center_lower, Direction::SW).ok()?;
+    let s = neighbor(&center_lower, Direction::S).ok()?;
+    let se = neighbor(&center_lower, Direction::SE).ok()?;
+    
+    Some(vec![
+        nw, n, ne,
+        w, center_lower.clone(), e,
+        sw, s, se
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
