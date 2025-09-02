@@ -463,7 +463,23 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                 format!("{} Nostr Relay", sub),
                 format!(r#"Nostr Relay <span style="color: #4ade80; font-weight: 600;">[{}]</span>"#, sub),
                 String::new(),  // No badge
-                format!(r#"A Nostr relay that rejects events with geohash tags not matching <code style="color: #4ade80;">{}</code>. Events without geohash tags are accepted."#, sub),
+                format!(r#"<div style="line-height: 1.8;">
+                    <p style="margin-bottom: 16px;">Each geohash subdomain (e.g., <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">{}.{}</code>) represents a distinct geographic cell with enforced data isolation.</p>
+                    <ul style="list-style: none; padding-left: 0; margin: 0;">
+                        <li style="margin-bottom: 12px; padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            Events explicitly tagged with <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">["g", "{}"]</code> must be posted here
+                        </li>
+                        <li style="margin-bottom: 12px; padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            Events without geohash tags posted here are implicitly bound to the <strong>{}</strong> location — by choosing this endpoint, publishers signal that these events belong to this geographic scope, even without explicit tags
+                        </li>
+                        <li style="padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            <strong>Cells are isolated:</strong> there is no hierarchy across geohash levels. For example, events in <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">{}a</code> are not visible in <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">{}</code>, and vice versa. Think of each subdomain as a separate room in a building — conversations stay in the room they were spoken, and don't leak into adjacent or larger spaces
+                        </li>
+                    </ul>
+                </div>"#, sub, domain, sub, sub, sub, sub),
                 vec![
                     format!(r#"Events with ["g", "{}"] tag"#, sub),
                     "Events without any geohash tag".to_string(),
