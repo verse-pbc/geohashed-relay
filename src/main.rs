@@ -199,15 +199,30 @@ where
                 .and_then(|h| h.to_str().ok())
                 .unwrap_or("localhost");
             
-            let parts: Vec<&str> = host_str.split('.').collect();
-            let (subdomain, domain) = if parts.len() > 2 || (parts.len() == 2 && !parts[0].contains(':')) {
-                // Has subdomain
+            // Strip port if present
+            let host_without_port = host_str.split(':').next().unwrap_or(host_str);
+            
+            let parts: Vec<&str> = host_without_port.split('.').collect();
+            let (subdomain, domain) = if parts.len() > 2 {
+                // Definitely has subdomain (e.g., test.example.com)
                 let sub = parts[0].to_string();
                 let dom = parts[1..].join(".");
                 (Some(sub), dom)
+            } else if parts.len() == 2 {
+                // Two parts - could be subdomain or just domain
+                // Check if first part is a valid geohash
+                if crate::geohash_utils::is_valid_geohash(parts[0]) {
+                    // It's a geohash subdomain
+                    let sub = parts[0].to_string();
+                    let dom = parts[1].to_string();
+                    (Some(sub), dom)
+                } else {
+                    // It's just a domain (e.g., example.local)
+                    (None, host_without_port.to_string())
+                }
             } else {
-                // No subdomain, just domain
-                (None, host_str.to_string())
+                // No subdomain (localhost, etc.)
+                (None, host_without_port.to_string())
             };
             
             // Generate informative HTML based on current scope
@@ -227,12 +242,12 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
     // - Kind 1: Text notes (regular posts with optional location tagging)
     // - Kind 0: Metadata (profiles with location, rare)
     
-    // Generate map HTML for geohash subdomains with clickable grid
-    let map_section = subdomain.and_then(|sub| {
+    // Generate map HTML - for geohash subdomains or root domain
+    let map_section = if let Some(sub) = subdomain {
         if crate::geohash_utils::is_valid_geohash(sub) {
-            // Get center coordinates and precision
-            let center_decoded = geohash::decode(sub).ok()?;
-            let precision = sub.len();
+            // Get center coordinates and precision for geohash subdomain
+            if let Ok(center_decoded) = geohash::decode(sub) {
+                let precision = sub.len();
             
             // Calculate zoom level
             let zoom = match precision {
@@ -452,10 +467,191 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                 sub,
                 domain
             ))
+            } else {
+                None
+            }
         } else {
             None
         }
-    }).unwrap_or_default();
+    } else {
+        // Root domain - show world map
+        Some(format!(
+            r#"<div class="section">
+                <div class="section-title">Global Geohash Grid</div>
+                <div id="map" style="height: 400px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);"></div>
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <script>
+                    // Polyfill for module to avoid error
+                    if (typeof module === 'undefined') {{
+                        window.module = {{ exports: {{}} }};
+                    }}
+                </script>
+                <script src="https://cdn.jsdelivr.net/npm/ngeohash@0.6.3/main.js"></script>
+                <script>
+                    var map = L.map('map', {{
+                        maxBounds: [[-60, -180], [85, 180]],  // Focus on inhabited areas
+                        maxBoundsViscosity: 1.0,  // Make bounds "sticky"
+                        minZoom: 1.8,
+                        maxZoom: 18,
+                        zoomSnap: 0.1  // Allow fractional zoom levels
+                    }}).setView([10, 0], 1.8);  // Better zoom to fill viewport
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '© OpenStreetMap contributors',
+                        noWrap: true  // Prevent tile wrapping
+                    }}).addTo(map);
+                    
+                    var geohashLayer = null;
+                    
+                    function generateGeohashGrid() {{
+                        if (geohashLayer) {{
+                            map.removeLayer(geohashLayer);
+                        }}
+                        
+                        var bounds = map.getBounds();
+                        var zoom = map.getZoom();
+                        
+                        // Determine precision based on zoom level
+                        var precision;
+                        if (zoom < 3) precision = 1;
+                        else if (zoom < 6) precision = 2;
+                        else if (zoom < 9) precision = 3;
+                        else if (zoom < 12) precision = 4;
+                        else if (zoom < 15) precision = 5;
+                        else if (zoom < 18) precision = 6;
+                        else precision = 7;
+                        
+                        precision = Math.min(precision, 7);
+                        
+                        // Get all geohashes that intersect with the visible area
+                        var geohashSet = new Set();
+                        
+                        // Get corner geohashes
+                        var sw = geohash.encode(bounds.getSouth(), bounds.getWest(), precision);
+                        var ne = geohash.encode(bounds.getNorth(), bounds.getEast(), precision);
+                        
+                        // Decode to get the actual bounds of these geohashes
+                        var swBounds = geohash.decode_bbox(sw);
+                        var neBounds = geohash.decode_bbox(ne);
+                        
+                        // Calculate how many geohash cells we need to cover
+                        var cellSize = swBounds[3] - swBounds[1]; // longitude width of one cell
+                        var cellHeight = swBounds[2] - swBounds[0]; // latitude height of one cell
+                        
+                        // Generate all geohashes in the grid
+                        var maxCells = 200;
+                        var cellCount = 0;
+                        
+                        for (var lat = swBounds[0]; lat <= neBounds[2] + cellHeight && cellCount < maxCells; lat += cellHeight * 0.99) {{
+                            for (var lng = swBounds[1]; lng <= neBounds[3] + cellSize && cellCount < maxCells; lng += cellSize * 0.99) {{
+                                var gh = geohash.encode(lat, lng, precision);
+                                if (gh) {{
+                                    var ghBounds = geohash.decode_bbox(gh);
+                                    // Check if this geohash intersects with the viewport
+                                    if (ghBounds[2] >= bounds.getSouth() && ghBounds[0] <= bounds.getNorth() &&
+                                        ghBounds[3] >= bounds.getWest() && ghBounds[1] <= bounds.getEast()) {{
+                                        geohashSet.add(gh);
+                                        cellCount++;
+                                    }}
+                                }}
+                            }}
+                        }}
+                        
+                        // Create GeoJSON features
+                        var features = [];
+                        geohashSet.forEach(function(gh) {{
+                            var bbox = geohash.decode_bbox(gh);
+                            features.push({{
+                                type: 'Feature',
+                                properties: {{
+                                    geohash: gh
+                                }},
+                                geometry: {{
+                                    type: 'Polygon',
+                                    coordinates: [[
+                                        [bbox[1], bbox[0]],  // SW
+                                        [bbox[3], bbox[0]],  // SE
+                                        [bbox[3], bbox[2]],  // NE
+                                        [bbox[1], bbox[2]],  // NW
+                                        [bbox[1], bbox[0]]   // close polygon
+                                    ]]
+                                }}
+                            }});
+                        }});
+                        
+                        // Add layer to map
+                        geohashLayer = L.geoJSON({{
+                            type: 'FeatureCollection',
+                            features: features
+                        }}, {{
+                            style: function(feature) {{
+                                return {{
+                                    fillColor: '#60a5fa',
+                                    weight: 0.5,
+                                    opacity: 0.7,
+                                    color: '#60a5fa',
+                                    fillOpacity: 0.05
+                                }};
+                            }},
+                            onEachFeature: function(feature, layer) {{
+                                var gh = feature.properties.geohash;
+                                
+                                // Add permanent label for all cells
+                                layer.bindTooltip(gh, {{
+                                    permanent: true,
+                                    direction: 'center',
+                                    className: 'geohash-label'
+                                }});
+                                
+                                // Make clickable - navigate to subdomain
+                                layer.on('click', function(e) {{
+                                    window.location.href = 'https://' + gh + '.{}';
+                                }});
+                                
+                                // Add hover effects
+                                layer.on('mouseover', function(e) {{
+                                    this.setStyle({{
+                                        fillOpacity: 0.2,
+                                        weight: 1.5
+                                    }});
+                                }});
+                                
+                                layer.on('mouseout', function(e) {{
+                                    this.setStyle({{
+                                        fillOpacity: 0.05,
+                                        weight: 0.5
+                                    }});
+                                }});
+                            }}
+                        }}).addTo(map);
+                    }}
+                    
+                    // Generate initial grid
+                    generateGeohashGrid();
+                    
+                    // Regenerate on map move/zoom
+                    map.on('moveend', function() {{
+                        generateGeohashGrid();
+                    }});
+                </script>
+                <style>
+                    .geohash-label {{
+                        background: rgba(96, 165, 250, 0.9);
+                        border: none;
+                        color: white;
+                        font-weight: 600;
+                        font-size: 10px;
+                        padding: 1px 4px;
+                        white-space: nowrap;
+                    }}
+                    .leaflet-interactive:hover {{
+                        cursor: pointer;
+                    }}
+                </style>
+            </div>"#,
+            domain
+        ))
+    }.unwrap_or_default();
     
     let (title, heading, badge, description, accepted_rules, rejected_rules, error_section, usage_examples) = match subdomain {
         Some(sub) if crate::geohash_utils::is_valid_geohash(sub) => {
@@ -505,8 +701,8 @@ nak req -l 10 wss://{}.{}"#,
         Some(sub) => {
             // Invalid subdomain - show as root relay with note
             (
-                format!("Nostr Relay"),
-                format!("Nostr Relay"),
+                format!("Geohashed Nostr Relay"),
+                format!("Geohashed Nostr Relay"),
                 String::new(),
                 format!("A Nostr relay with geohash-based data isolation. Note: '{}' is not a valid geohash subdomain.", sub),
                 vec!["Events without geohash tags".to_string()],
@@ -531,10 +727,26 @@ nak req -l 10 wss://{}"#,
         None => {
             // Root domain
             (
-                format!("Nostr Relay"),
-                format!("Nostr Relay"),
+                format!("Geohashed Nostr Relay"),
+                format!("Geohashed Nostr Relay"),
                 String::new(),  // No badge
-                "A Nostr relay with geohash-based data isolation. Events with geohash tags must be posted to their matching subdomain.".to_string(),
+                format!(r#"<div style="line-height: 1.8;">
+                    <p style="margin-bottom: 16px;">A Nostr relay system with geohash-based geographic data isolation. Each geohash subdomain represents a distinct geographic cell.</p>
+                    <ul style="list-style: none; padding-left: 0; margin: 0;">
+                        <li style="margin-bottom: 12px; padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            Events with geohash tags <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">["g", "geohash"]</code> must be posted to their matching subdomain (e.g., events tagged with <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">["g", "test"]</code> go to <code style="background: rgba(74, 222, 128, 0.1); padding: 2px 6px; border-radius: 4px; color: #4ade80;">test.{}</code>)
+                        </li>
+                        <li style="margin-bottom: 12px; padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            This root relay only accepts events <strong>without</strong> geohash tags — it serves as the global scope for non-location-specific content
+                        </li>
+                        <li style="padding-left: 24px; position: relative;">
+                            <span style="position: absolute; left: 0; color: #4ade80;">•</span>
+                            <strong>Complete isolation:</strong> Each geohash subdomain is a separate data space. Events don't propagate between geographic levels or adjacent cells. Think of each subdomain as a separate room — conversations stay where they were posted
+                        </li>
+                    </ul>
+                </div>"#, domain),
                 vec!["Events without geohash tags".to_string()],
                 vec![
                     r#"Events with ["g", "geohash"] tags"#.to_string(),
