@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_strict_validation() {
         // These are syntactically valid but might not be decodable
-        assert!(is_valid_geohash_strict("drt2z"));   // San Francisco area
+        assert!(is_valid_geohash_strict("drt2z"));   // Boston/Cambridge area
         assert!(is_valid_geohash_strict("9q8yy"));   // Los Angeles area
         assert!(is_valid_geohash_strict("gbsuv"));   // London area
         assert!(is_valid_geohash_strict("u"));       // Northern hemisphere
