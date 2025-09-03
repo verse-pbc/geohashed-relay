@@ -280,6 +280,26 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                             attribution: '© OpenStreetMap contributors'
                         }}).addTo(map);
                         
+                        // Add custom control for interaction hint
+                        var HintControl = L.Control.extend({{
+                            options: {{
+                                position: 'topright'
+                            }},
+                            onAdd: function(map) {{
+                                var div = L.DomUtil.create('div', 'hint-control');
+                                div.innerHTML = 'Click cells • Zoom for detail';
+                                div.style.background = 'rgba(0, 0, 0, 0.7)';
+                                div.style.color = '#9ca3af';
+                                div.style.padding = '6px 10px';
+                                div.style.borderRadius = '6px';
+                                div.style.fontSize = '0.85rem';
+                                div.style.backdropFilter = 'blur(4px)';
+                                div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                                return div;
+                            }}
+                        }});
+                        new HintControl().addTo(map);
+                        
                         var currentGeohash = '{}';
                         var geohashLayer = null;
                         
@@ -478,7 +498,9 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
         Some(format!(
             r#"<div class="section">
                 <div class="section-title">Global Geohash Grid</div>
-                <div id="map" style="height: 400px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);"></div>
+                <div style="position: relative;">
+                    <div id="map" style="height: 400px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);"></div>
+                </div>
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <script>
@@ -500,6 +522,26 @@ fn generate_info_html(subdomain: Option<&str>, domain: &str) -> String {
                         attribution: '© OpenStreetMap contributors',
                         noWrap: true  // Prevent tile wrapping
                     }}).addTo(map);
+                    
+                    // Add custom control for interaction hint
+                    var HintControl = L.Control.extend({{
+                        options: {{
+                            position: 'topright'
+                        }},
+                        onAdd: function(map) {{
+                            var div = L.DomUtil.create('div', 'hint-control');
+                            div.innerHTML = 'Click cells • Zoom for detail';
+                            div.style.background = 'rgba(0, 0, 0, 0.7)';
+                            div.style.color = '#9ca3af';
+                            div.style.padding = '6px 10px';
+                            div.style.borderRadius = '6px';
+                            div.style.fontSize = '0.85rem';
+                            div.style.backdropFilter = 'blur(4px)';
+                            div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                            return div;
+                        }}
+                    }});
+                    new HintControl().addTo(map);
                     
                     var geohashLayer = null;
                     
@@ -715,7 +757,7 @@ nak req -l 10 wss://{}.{}"#,
 nak event -c "Global announcement" wss://{}
 
 <span class="comment"># Location event (requires valid geohash subdomain)</span>
-nak event -k 20000 -c "SF meetup" -t g=drt2z wss://{}
+nak event -k 20000 -c "Boston meetup" -t g=drt2z wss://{}
 <span class="comment"># Error: use wss://drt2z.{} instead</span>
 
 <span class="comment"># Query all events from root scope</span>
@@ -757,7 +799,7 @@ nak req -l 10 wss://{}"#,
 nak event -c "Global announcement" wss://{}
 
 <span class="comment"># Location event (will be rejected - wrong subdomain)</span>
-nak event -k 20000 -c "SF meetup" -t g=drt2z wss://{}
+nak event -k 20000 -c "Boston meetup" -t g=drt2z wss://{}
 <span class="comment"># Error: use wss://drt2z.{} instead</span>
 
 <span class="comment"># Geotagged note (will be rejected - wrong subdomain)</span>
